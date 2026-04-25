@@ -7,8 +7,8 @@
 
 (defprotocol Automaton
   (new-state [this is-final] "Create a new state, returning this and the new state")
-  (set-start-state [this state] "set the start state")
-  (get-start-state [this] "get the start state")
+  (set-start-state [this state] "set the start state id")
+  (get-start-state [this] "get the start state id")
   (get-state [_this id] "Get the state with id")
   (get-states [_this] "get a list of states")
   (connect-states [this start end terminal] "Connect start and end using the terminal, form a new connection (edge)")

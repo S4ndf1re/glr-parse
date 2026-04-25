@@ -82,13 +82,3 @@
         graph (autom/set-start-state graph first-state)]
     (autom/normalize (to-nfa rule graph first-state final-state))))
 
-
-
-(defn test
-  []
-  (let [rule (->Sequence [(->OneOrMore (->Digit))
-                          (->Constant \.)
-                          (->ZeroOrMore (->Digit))])
-        nfa-graph (convert-to-nfa-graph rule)]
-    (autom/to-graphviz nfa-graph "nfa.png")
-    (autom/to-graphviz (nfa/to-dfa nfa-graph) "dfa.png")))

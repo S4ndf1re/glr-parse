@@ -29,7 +29,8 @@
   (normalize [this] (if (and (= a b) (> a 0))
                       (->ConstTerminal a)
                       this))
-  (match [_this c] (and (>= c a) (<= c a))))
+  (match [_this c] (and (>= (int c) (int a))
+                        (<= (int c) (int b)))))
 
 (defn new-terminal-from-interval
   "expects [start end] as ints, converts into terminal.
@@ -56,8 +57,6 @@
            (if attack
              (recur (mapcat #(intv/split-if-intersecting % attack) targets) attacks)
              targets)))))
-
-
 
 (defn is-epsilon
   [terminal]

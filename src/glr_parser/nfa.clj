@@ -111,7 +111,6 @@
   ([nfa-graph start-state-id]
    (loop [[to-visit-id & to-visit-rest] (list start-state-id)
           visited-ids #{}]
-     (println to-visit-id)
      (if to-visit-id
        (if (not (get visited-ids to-visit-id))
          (recur (transduce (comp
@@ -129,7 +128,6 @@
   (let [targets (get-transitions-for-states (map #(autom/get-state nfa-graph %) state-set) terminal)
         eps-closure (transduce (eps-closure nfa-graph) clojure.set/union #{} targets)
         is-final (reduce (fn [f s] (or f (state/is-final (autom/get-state nfa-graph s)))) false eps-closure)]
-    (println "Targets: " targets)
     (if (states-map eps-closure)
       (list eps-closure dfa-graph (states-map eps-closure))
       ;; Create a new state, return the new graph and new state
