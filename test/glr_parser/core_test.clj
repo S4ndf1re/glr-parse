@@ -14,8 +14,8 @@
         nfa-graph (rgx/build-nfa-graph rules)
         dfa-graph (nfa/to-dfa nfa-graph)]
 
-    (autom/to-graphviz nfa-graph "nfa.png")
-    (autom/to-graphviz dfa-graph "dfa.png")
+    (autom/to-graphviz nfa-graph "img/nfa.png")
+    (autom/to-graphviz dfa-graph "img/dfa.png")
 
     (testing "dfa matches 1234.5678"
       (let [[longest overall] (dfa/execute-dfa dfa-graph "1234.5678")]
@@ -53,8 +53,8 @@
         nfa-graph (rgx/build-nfa-graph rules)
         dfa-graph (nfa/to-dfa nfa-graph)]
 
-    (autom/to-graphviz nfa-graph "nfa2.png")
-    (autom/to-graphviz dfa-graph "dfa2.png")
+    (autom/to-graphviz nfa-graph "img/nfa2.png")
+    (autom/to-graphviz dfa-graph "img/dfa2.png")
 
     (testing "dfa matches 1234.5678"
       (let [[longest overall] (dfa/execute-dfa dfa-graph "1234.5678")]
