@@ -23,10 +23,12 @@
   (get-id [_this] id)
 
   (add-connection [this target terminal]
-    (let [connection-set (get connections terminal #{})
-          connection-set (conj connection-set target)
-          new-connections (assoc connections terminal connection-set)]
-      (assoc this :connections new-connections)))
+    (if (not (term/is-terminal? terminal))
+      (throw (ex-info "terminal must be of instance terminal" {}))
+      (let [connection-set (get connections terminal #{})
+            connection-set (conj connection-set target)
+            new-connections (assoc connections terminal connection-set)]
+        (assoc this :connections new-connections))))
 
   (remove-connection [this target]
     (assoc this :connections
@@ -47,7 +49,10 @@
         (assoc this :connections (dissoc connections terminal)))))
 
   (get-all-terminals [_this]
-    (keys connections))
+    (let [conn-keys (keys connections)]
+      (if (seq conn-keys)
+        conn-keys
+        (list))))
 
   (to-edge-list [_this]
     (for [conn connections

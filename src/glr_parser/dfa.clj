@@ -89,19 +89,17 @@
 (defn execute-dfa
   [graph input]
   (let [start-state (autom/get-start-state graph)]
-    (if (not start-state)
+    (if-not start-state
       (throw (Exception. "start state must be configured"))
       (loop [longest-match nil
              current-state start-state
-             [c & cs] (seq input)
+             [c & cs] input
              idx 0]
         (if c
-          ;; Check if a next state exists, if yes. check if its a match to compute the longest matching sequence counter
-          (let [next-state (state/get-connections-for-symbol (autom/get-state graph current-state) c)]
+          (let [longest-match (if (state/is-final (autom/get-state graph current-state)) (new-match idx graph current-state) longest-match)
+                next-state (state/get-connections-for-symbol (autom/get-state graph current-state) c)]
             (if next-state
-              (if (state/is-final (autom/get-state graph current-state))
-                (recur (new-match (+ idx 1) graph current-state) next-state cs (+ idx 1))
-                (recur longest-match next-state cs (+ idx 1)))
+              (recur longest-match next-state cs (+ idx 1))
               ;; Since no next state for c exists, the whole word does not match, and the processing ends
               (list longest-match false)))
           ;; The input has reached its end, hence the longest match is returned,

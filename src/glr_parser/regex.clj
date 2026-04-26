@@ -2,7 +2,6 @@
   (:require [glr-parser.nfa :as nfa]
             [glr-parser.graph.automaton :as autom]
             [glr-parser.graph.terminal :as term]
-            [glr-parser.graph.state :as state]
             [glr-parser.graph.meta :as meta]))
 
 (defprotocol ToNfa

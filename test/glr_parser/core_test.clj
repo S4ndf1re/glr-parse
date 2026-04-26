@@ -3,7 +3,8 @@
             [glr-parser.regex :as rgx]
             [glr-parser.nfa :as nfa]
             [glr-parser.dfa :as dfa]
-            [glr-parser.graph.automaton :as autom]))
+            [glr-parser.graph.automaton :as autom]
+            [glr-parser.lexer :as lex]))
 
 (deftest regex-to-nfa-to-dfa-to-exec-test
   (let [rules (-> ()
@@ -96,3 +97,31 @@
         (is (= (longest :length) (count "123abc")))
         (is (= (longest :rule) :word))
         (is (= overall true))))))
+
+(deftest lexer-test-1
+  (let [lexer (-> (lex/new-empty "abc 1234 1234.1234" "abc")
+                  (lex/add-const :abc "abc")
+                  (lex/add-rule :number
+                                (rgx/->Sequence [(rgx/->OneOrMore (rgx/->Digit))
+                                                 (rgx/->Constant \.)
+                                                 (rgx/->ZeroOrMore (rgx/->Digit))]))
+                  (lex/add-rule :word
+                                (rgx/->OneOrMore (rgx/->Or [(rgx/->Range \a \z)
+                                                            (rgx/->Range \A \Z)
+                                                            (rgx/->Digit)])))
+                  (lex/add-rule :whitespace
+                                (rgx/->Or [(rgx/->Constant \space)
+                                           (rgx/->Constant \newline)]))
+                  (lex/add-skip :whitespace)
+                  (lex/build))]
+
+    (testing "expected tokens"
+      (let [expected-token-idents [:abc :word :number :eof]]
+        (loop [lexer lexer
+               [ex & exs] expected-token-idents]
+          (if ex
+            (let [[lexer token] (lex/advance lexer)]
+              (println ex token)
+              (is (= (:ident token) ex))
+              (recur lexer exs))
+            nil))))))

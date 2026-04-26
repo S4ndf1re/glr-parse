@@ -61,3 +61,7 @@
 (defn is-epsilon
   [terminal]
   (instance? EpsilonTerminal terminal))
+
+(defn is-terminal?
+  [terminal]
+  (satisfies?  Terminal terminal))
