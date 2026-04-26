@@ -2,13 +2,14 @@
   (:require
    [glr-parser.graph.automaton :as autom]
    [glr-parser.graph.edge-map :as em]
-   [glr-parser.graph.state :as state]))
+   [glr-parser.graph.state :as state]
+   [glr-parser.graph.meta :as meta]))
 
 (defrecord DfaAutomaton [states counter is-normalized start-state]
   autom/Automaton
-  (new-state [this is-final]
+  (new-state [this is-final meta]
     (let [next-id (+ counter 1)
-          state (state/->DfaState counter {} is-final)]
+          state (state/->DfaState counter {} is-final meta)]
       (list (-> this
                 (assoc :counter next-id)
                 (assoc :states (assoc states (state/get-id state) state)))
@@ -22,6 +23,9 @@
 
   (get-state [_this id]
     (get states id))
+
+  (set-state [this st]
+    (assoc-in this [:states (state/get-id st)] st))
 
   (get-states [_this]
     (vals states))
@@ -77,6 +81,11 @@
   []
   (->DfaAutomaton {} 0 false nil))
 
+(defn- new-match
+  [length graph st]
+  {:length length
+   :rule (meta/rule (state/get-meta (autom/get-state graph st)))})
+
 (defn execute-dfa
   [graph input]
   (let [start-state (autom/get-start-state graph)]
@@ -91,12 +100,12 @@
           (let [next-state (state/get-connections-for-symbol (autom/get-state graph current-state) c)]
             (if next-state
               (if (state/is-final (autom/get-state graph current-state))
-                (recur (+ idx 1) next-state cs (+ idx 1))
+                (recur (new-match (+ idx 1) graph current-state) next-state cs (+ idx 1))
                 (recur longest-match next-state cs (+ idx 1)))
               ;; Since no next state for c exists, the whole word does not match, and the processing ends
               (list longest-match false)))
           ;; The input has reached its end, hence the longest match is returned,
           ;; as well as if the current state is a final state, i.e. the whole word matches
           (if (state/is-final (autom/get-state graph current-state))
-            (list idx true)
+            (list (new-match idx graph current-state) true)
             (list longest-match false)))))))

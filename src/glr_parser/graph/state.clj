@@ -11,11 +11,13 @@
   (to-edge-list [this] "convert the state to a list of maps containting id, terminal and target, for all connections")
   (clear-edges [this] "clear all edges")
   (is-final [this] "Check if the state is final")
-  (get-connections-for-symbol [this c] "Try to match the character c to the terminals in connections, returning the first match found"))
+  (get-connections-for-symbol [this c] "Try to match the character c to the terminals in connections, returning the first match found")
+  (set-meta [this meta] "Set meta data")
+  (get-meta [this]))
 
 (defrecord
  ^{:doc "NfaState is an automaton state, that allows for epsilon transitions, and allows for multiple targets for a single terminal"}
- NfaState [id connections is-final]
+ NfaState [id connections is-final metadata]
   AutomatonState
 
   (get-id [_this] id)
@@ -60,11 +62,16 @@
     (let [connection-keys (filter #(term/match % c) (keys connections))]
       (if (seq connection-keys)
         (connections (first connection-keys))
-        (list)))))
+        (list))))
+
+  (set-meta [this meta]
+    (assoc this :metadata meta))
+  (get-meta [_this]
+    metadata))
 
 (defrecord
  ^{:doc "DfaState is a automaton state, that does not allow for epsilon terminals, and only allows for one target for a single termianl"}
- DfaState [id connections is-final]
+ DfaState [id connections is-final metadata]
   AutomatonState
   (get-id [_this] id)
 
@@ -98,4 +105,9 @@
     (let [connection-keys (filter #(term/match % c) (keys connections))]
       (if (seq connection-keys)
         (connections (first connection-keys))
-        nil))))
+        nil)))
+
+  (set-meta [this meta]
+    (assoc this :metadata meta))
+  (get-meta [_this]
+    metadata))

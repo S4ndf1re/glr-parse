@@ -4,13 +4,14 @@
             [glr-parser.graph.automaton :as autom]
             [glr-parser.dfa :as dfa]
             [glr-parser.graph.terminal :as term]
+            [glr-parser.graph.meta :as meta]
             [clojure.set]))
 
 (defrecord NfaAutomaton [states counter is-normalized start-state]
   autom/Automaton
-  (new-state [this is-final]
+  (new-state [this is-final meta]
     (let [next-id (+ counter 1)
-          state (state/->NfaState counter {} is-final)]
+          state (state/->NfaState counter {} is-final meta)]
       (list (-> this
                 (assoc :counter next-id)
                 (assoc :states (assoc states (state/get-id state) state)))
@@ -24,6 +25,9 @@
 
   (get-state [_this id]
     (get states id))
+
+  (set-state [this st]
+    (assoc-in this [:states (state/get-id st)] st))
 
   (get-states [_this]
     (vals states))
@@ -73,7 +77,10 @@
 
   (clear-edges [this]
     (assoc this :states
-           (reduce (fn [states [k s]] (assoc states k (state/clear-edges s))) states states))))
+           (reduce (fn [states [k s]] (assoc states k (state/clear-edges s))) states states)))
+
+  (apply-meta [this meta]
+    (assoc this :states (reduce-kv (fn [m k v] (assoc m k (state/set-meta v meta))) {} states))))
 
 (defn new-nfa-graph
   "Creates a new NFA with epsilon transitions.
@@ -123,16 +130,49 @@
          (recur to-visit-rest visited-ids))
        visited-ids))))
 
+(defn- get-precedence-by-id
+  [nfa-graph state-id]
+  (let [st (autom/get-state nfa-graph state-id)]
+    (if st
+      (meta/precedence (state/get-meta st))
+      nil)))
+
+(defn- get-rule-by-id
+  [nfa-graph state-id]
+  (let [st (autom/get-state nfa-graph state-id)]
+    (if st
+      (meta/rule (state/get-meta st))
+      nil)))
+
+(defn- is-closure-final
+  [graph closure]
+  (let [final-states (sort-by #(get-precedence-by-id graph %)
+                              (filter #(state/is-final (autom/get-state graph %)) closure))
+        is-final (not (= (first final-states) nil))]
+    (if (and (> (count final-states) 1)
+             (= (get-precedence-by-id graph (first final-states)) (get-precedence-by-id graph (second final-states))))
+      (throw (Exception. (str "ambiguity detected between rules '"
+                              (get-rule-by-id graph (first final-states))
+                              "' and '"
+                              (get-rule-by-id graph (second final-states))
+                              "'")))
+      (list (first final-states) is-final))))
+
 (defn- build-state-closure-for-terminal
   [nfa-graph dfa-graph states-map state-set terminal]
   (let [targets (get-transitions-for-states (map #(autom/get-state nfa-graph %) state-set) terminal)
         eps-closure (transduce (eps-closure nfa-graph) clojure.set/union #{} targets)
-        is-final (reduce (fn [f s] (or f (state/is-final (autom/get-state nfa-graph s)))) false eps-closure)]
-    (if (states-map eps-closure)
-      (list eps-closure dfa-graph (states-map eps-closure))
-      ;; Create a new state, return the new graph and new state
-      (let [[dfa-graph new-state] (autom/new-state dfa-graph is-final)]
-        (list eps-closure dfa-graph new-state)))))
+        [final-state is-final] (is-closure-final nfa-graph eps-closure)]
+    (if (seq eps-closure)
+      (if (states-map eps-closure)
+        (list eps-closure dfa-graph (states-map eps-closure))
+        ;; Create a new state, return the new graph and new state
+        (let [[dfa-graph new-state-id] (autom/new-state dfa-graph is-final
+                                                        (meta/new-meta (get-rule-by-id nfa-graph final-state)
+                                                                       (get-precedence-by-id nfa-graph final-state)
+                                                                       eps-closure))]
+          (list eps-closure dfa-graph new-state-id)))
+      (list nil dfa-graph nil))))
 
 (defn- process-state-and-terminals
   [nfa-graph dfa-graph states-map state-set terminals]
@@ -141,12 +181,14 @@
          states-map states-map
          created-states #{}]
     (if t
-      (let [[eps-closure new-graph new-state] (build-state-closure-for-terminal nfa-graph dfa-graph states-map state-set t)
-            new-graph (autom/connect-states new-graph (states-map state-set) new-state t)]
-        (recur new-graph
-               ts
-               (assoc states-map eps-closure new-state)
-               (conj created-states eps-closure)))
+      (let [[eps-closure new-graph new-state] (build-state-closure-for-terminal nfa-graph dfa-graph states-map state-set t)]
+        (if (and eps-closure new-state)
+          (let [new-graph (autom/connect-states new-graph (states-map state-set) new-state t)]
+            (recur new-graph
+                   ts
+                   (assoc states-map eps-closure new-state)
+                   (conj created-states eps-closure)))
+          (recur new-graph ts states-map created-states)))
 
       (list dfa-graph states-map created-states))))
 
@@ -159,8 +201,14 @@
       (throw (Exception. "Start state of nfa not specified"))
 
       (let [start-state-eps-closure (eps-closure graph start-state)
+            [final-state is-final] (is-closure-final graph start-state-eps-closure)
             dfa-graph (dfa/new-dfa)
-            [dfa-graph first-state] (autom/new-state dfa-graph false)
+            [dfa-graph first-state] (autom/new-state dfa-graph
+                                                     is-final
+                                                     (meta/new-meta
+                                                      (get-rule-by-id graph final-state)
+                                                      (get-precedence-by-id graph final-state)
+                                                      start-state-eps-closure))
             dfa-graph (autom/set-start-state dfa-graph first-state)]
         ;; Loop as long as there is a state that is not visited
         (loop [dfa-graph dfa-graph
