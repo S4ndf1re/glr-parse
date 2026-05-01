@@ -17,21 +17,28 @@
    :input-string (vec input-string)
    :filename filename})
 
+(defn- already-contains-const-or-rule
+  [lexer ident]
+  (or (get-in lexer [:consts ident]) (get-in lexer [:rules ident])))
+
 (defn add-const
+  "Add a new constant, ensuring priority over rules for equal length matches"
   [lexer ident constant]
-  (if (get-in lexer [:consts ident])
+  (if (already-contains-const-or-rule lexer ident)
     (throw (ex-info "constant already exists" {:type :const-exists :ident ident :constant constant}))
     (assoc-in lexer [:consts ident] {:ident ident
                                      :constant (clojure.string/trim constant)
                                      :length (count (clojure.string/trim constant))})))
 
 (defn add-rule
+  "Add a new rule, consisting of a regex. When both a constant and regex rule match with the same lenght, the constant has priority. Otherwise, the longest match is chosen"
   [lexer ident rule & {:keys [precedence] :or {precedence 0}}]
-  (if (get-in lexer [:rules ident])
+  (if (already-contains-const-or-rule lexer ident)
     (throw (ex-info "rule already exists" {:type :rule-exists :ident ident :rule rule}))
     (assoc-in lexer [:rules ident] {:ident ident :rule rule :precedence precedence})))
 
 (defn add-skip
+  "Add a rule or constant to the skip list"
   [lexer ident]
   (assoc lexer :skips (conj (:skips lexer) ident)))
 
@@ -45,6 +52,8 @@
        (map key)))
 
 (defn build
+  "Build the lexer by applying all rules into a nfa that is then converted to a dfa. This dfa can be used to match all rules, detecting ambiguity during nfa->dfa conversion.
+  After building, the lexer is ready to advance or peek"
   [lexer]
   (let [duplicates (duplicate-consts lexer)
         nfa-graph (rgx/build-nfa-graph (vals (:rules lexer)))
