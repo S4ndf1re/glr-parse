@@ -4,7 +4,6 @@
    [glr-parser.nfa :as nfa]
    [clojure.string :as s]
    [glr-parser.dfa :as dfa]
-   [clojure.set :as set]
    [glr-parser.graph.automaton :as autom]))
 
 (defn new-empty
@@ -97,12 +96,27 @@
 
     :else (throw (ex-info "CRITICAL: all cases checked already" {}))))
 
-(defn new-token
+(defn- new-token
   [ident value start end]
   {:ident ident
-   :value value
+   :value (apply str value)
    :start start
    :end end})
+
+(defn token-range
+  "Get the start-end range in the form [start, end) for a token"
+  [tok]
+  (list (:start tok) (:end tok)))
+
+(defn token-ident
+  "Get the token identifier as specified by the rule"
+  [tok]
+  (:ident tok))
+
+(defn token-value
+  "Get the value as a string. Note that the string conversion from vector of chars to string is performed in the new-token private function"
+  [tok]
+  (:value tok))
 
 (defn- peek-with-length
   "Peek a token, also return the length the lexer would have to advance, to land behind the token. This is also the length of the matched token"
@@ -121,23 +135,30 @@
   [lexer next-idx]
   (assoc lexer :current-idx next-idx))
 
+(defn advance
+  "Advance the lexer by one token, returning both the lexer and the token. If the additional parameter n is supplied, advance n times.
+  If the advanced token is part of the skips set, skip the token and return the logical next token by recursively calling into advance"
+  ([lexer]
+   (let [[match-length token] (peek-with-length lexer)
+         start (:current-idx lexer)
+         end (+ start match-length)]
+     (if ((:skips lexer) token)
+       (advance (advance-lexer-to-idx lexer end))
+       (list (advance-lexer-to-idx lexer end)
+             (new-token token (subvec (:input-string lexer) start end) start end)))))
+  ([lexer n]
+   (loop [n n
+          tokens []
+          lexer lexer]
+     (if (> n 0)
+       (let [[lex, tok] (advance lexer)]
+         (recur (dec n) (conj tokens tok) lex))
+       (list lexer
+             (into '() tokens))))))
+
 #_{:clj-kondo/ignore [:redefined-var]}
 (defn peek
-  [lexer]
-  (let [[match-length token] (peek-with-length lexer)
-        start (:current-idx lexer)
-        end (+ start match-length)]
-    (if ((:skips lexer) token)
-      (peek (advance-lexer-to-idx lexer end))
-      (new-token token (subvec (:input-string lexer) start end) start end))))
-
-(defn advance
-  "Advance the lexer by one token, returning both the lexer and the token"
-  [lexer]
-  (let [[match-length token] (peek-with-length lexer)
-        start (:current-idx lexer)
-        end (+ start match-length)]
-    (if ((:skips lexer) token)
-      (advance (advance-lexer-to-idx lexer end))
-      (list (advance-lexer-to-idx lexer end)
-            (new-token token (subvec (:input-string lexer) start end) start end)))))
+  "Peek the next token, by executing advance, but not returning the changed lexer.
+  An additional parameter n can be supplied, so that n tokens are peeked and returned list"
+  ([lexer] (second (advance lexer)))
+  ([lexer n] (second (advance lexer n))))
