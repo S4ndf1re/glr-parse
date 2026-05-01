@@ -93,7 +93,7 @@
       (throw (Exception. "start state must be configured"))
       (loop [longest-match nil
              current-state start-state
-             [c & cs] input
+             [c & cs] (seq input)
              idx 0]
         (if c
           (let [longest-match (if (state/is-final (autom/get-state graph current-state)) (new-match idx graph current-state) longest-match)
