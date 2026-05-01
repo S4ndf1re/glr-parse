@@ -1,4 +1,4 @@
-(ns glr-parser.dfa
+(ns glr-parser.graph.dfa
   (:require
    [glr-parser.graph.automaton :as autom]
    [glr-parser.graph.edge-map :as em]
@@ -75,7 +75,10 @@
 
   (clear-edges [this]
     (assoc this :states
-           (reduce (fn [states [k s]] (assoc states k (state/clear-edges s))) states states))))
+           (reduce (fn [states [k s]] (assoc states k (state/clear-edges s))) states states)))
+
+  (apply-meta [this meta]
+    (assoc this :states (reduce-kv (fn [m k v] (assoc m k (state/set-meta v meta))) {} states))))
 
 (defn new-dfa
   []

@@ -1,5 +1,5 @@
 (ns glr-parser.regex
-  (:require [glr-parser.nfa :as nfa]
+  (:require [glr-parser.graph.nfa :as nfa]
             [glr-parser.graph.automaton :as autom]
             [glr-parser.graph.terminal :as term]
             [glr-parser.graph.meta :as meta]))

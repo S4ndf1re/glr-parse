@@ -1,8 +1,8 @@
 (ns glr-parser.regex-test
   (:require [glr-parser.regex :as rgx]
             [glr-parser.graph.automaton :as autom]
-            [glr-parser.nfa :as nfa]
-            [glr-parser.dfa :as dfa]
+            [glr-parser.graph.nfa :as nfa]
+            [glr-parser.graph.dfa :as dfa]
             [clojure.test :refer [testing is deftest]]))
 
 (deftest regex-to-nfa-to-dfa-to-exec-test

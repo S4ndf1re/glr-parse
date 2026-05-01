@@ -1,9 +1,9 @@
 (ns glr-parser.lexer
   (:require
    [glr-parser.regex :as rgx]
-   [glr-parser.nfa :as nfa]
+   [glr-parser.graph.nfa :as nfa]
    [clojure.string :as s]
-   [glr-parser.dfa :as dfa]
+   [glr-parser.graph.dfa :as dfa]
    [glr-parser.graph.automaton :as autom]))
 
 (defn new-empty

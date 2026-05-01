@@ -1,8 +1,8 @@
-(ns glr-parser.nfa
+(ns glr-parser.graph.nfa
   (:require [glr-parser.graph.state :as state]
             [glr-parser.graph.edge-map :as em]
             [glr-parser.graph.automaton :as autom]
-            [glr-parser.dfa :as dfa]
+            [glr-parser.graph.dfa :as dfa]
             [glr-parser.graph.terminal :as term]
             [glr-parser.graph.meta :as meta]
             [clojure.set]))
