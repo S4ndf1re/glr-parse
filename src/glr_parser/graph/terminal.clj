@@ -18,14 +18,16 @@
 (defrecord ConstTerminal [const]
   Terminal
   (to-interval [_this] [(int const) (int const)])
-  (to-label [_this] (str const))
+  (to-label [_this] (if (= \\ const)
+                      "\\\\"
+                      (str const)))
   (normalize [this] this)
   (match [_this c] (= const c)))
 
 (defrecord RangeTerminal [a b]
   Terminal
   (to-interval [_this] [(int a) (int b)])
-  (to-label [_this] (str "[" a "-" b "]"))
+  (to-label [_this] (str "[" (if (= \\ a) "\\\\" a) "-" (if (= \\ b) "\\\\" b) "]"))
   (normalize [this] (if (and (= a b) (> a 0))
                       (->ConstTerminal a)
                       this))

@@ -29,3 +29,39 @@
               (is (= (lex/token-ident token) ex))
               (recur lexer exs))
             nil))))))
+
+(deftest lexer-test-strings-1
+  (let [lexer (-> (lex/new-empty "\"test \\n 123\" \"cdef.hello, world \\\" \" abc 123." "abc")
+                  (lex/add-const :abc "abc")
+                  (lex/add-rule :number
+                                (rgx/->Sequence [(rgx/->OneOrMore (rgx/->Digit))
+                                                 (rgx/->Constant \.)
+                                                 (rgx/->ZeroOrMore (rgx/->Digit))]))
+                  (lex/add-rule :string
+                                (rgx/->Sequence [(rgx/->Constant \")
+                                                 (rgx/->ZeroOrMore
+                                                  (rgx/->Or [(rgx/->Range \space \!)
+                                                             (rgx/->Range \# \[)
+                                                             (rgx/->Range \] \~)
+                                                             (rgx/->Sequence [(rgx/->Constant (char 92))
+                                                                              (rgx/->Or [(rgx/->Constant \\)
+                                                                                         (rgx/->Constant \n)
+                                                                                         (rgx/->Constant \r)
+                                                                                         (rgx/->Constant \t)
+                                                                                         (rgx/->Constant \")])])]))
+                                                 (rgx/->Constant \")]))
+                  (lex/add-rule :whitespace
+                                (rgx/->Or [(rgx/->Constant \space)
+                                           (rgx/->Constant \newline)]))
+                  (lex/add-skip :whitespace)
+                  (lex/build))]
+
+    (testing "expected tokens"
+      (let [expected-token-idents [:string :string :abc :number :eof]]
+        (loop [lexer lexer
+               [ex & exs] expected-token-idents]
+          (if ex
+            (let [[lexer token] (lex/advance lexer)]
+              (is (= (lex/token-ident token) ex))
+              (recur lexer exs))
+            nil))))))
