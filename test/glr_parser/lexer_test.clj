@@ -26,6 +26,6 @@
                [ex & exs] expected-token-idents]
           (if ex
             (let [[lexer token] (lex/advance lexer)]
-              (is (= (:ident token) ex))
+              (is (= (lex/token-ident token) ex))
               (recur lexer exs))
             nil))))))
