@@ -58,7 +58,6 @@
   (let [duplicates (duplicate-consts lexer)
         nfa-graph (rgx/build-nfa-graph (vals (:rules lexer)))
         dfa-graph (nfa/to-dfa nfa-graph)]
-    (autom/to-graphviz dfa-graph "debug_dfa.png")
     (if (seq duplicates)
       (throw (ex-info "duplicate constants found" {:type :duplicate-consts
                                                    :duplicates duplicates}))
