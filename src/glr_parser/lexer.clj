@@ -3,8 +3,7 @@
    [glr-parser.regex :as rgx]
    [glr-parser.graph.nfa :as nfa]
    [clojure.string :as s]
-   [glr-parser.graph.dfa :as dfa]
-   [glr-parser.graph.automaton :as autom]))
+   [glr-parser.graph.dfa :as dfa]))
 
 (defn new-empty
   "Build a new lexer, that accepts both the consts and rules. Skip rules that are contained in skips by name"
