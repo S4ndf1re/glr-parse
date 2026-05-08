@@ -5,6 +5,8 @@
    [clojure.string :as s]
    [glr-parser.graph.dfa :as dfa]))
 
+(def reserved-keywords #{:eof})
+
 (defn new-empty
   "Build a new lexer, that accepts both the consts and rules. Skip rules that are contained in skips by name"
   [input-string filename]
@@ -18,7 +20,7 @@
 
 (defn ident-exists
   [lexer ident]
-  (or (get-in lexer [:consts ident]) (get-in lexer [:rules ident])))
+  (or (get-in lexer [:consts ident]) (get-in lexer [:rules ident]) (contains? reserved-keywords ident)))
 
 (defn add-const
   "Add a new constant, ensuring priority over rules for equal length matches"
