@@ -6,6 +6,8 @@
    [glr-parser.parser.dotted :as dot]
    [glr-parser.parser.rule :as rl]))
 
+(def reserved-keywords #{:$shell})
+
 (defn new-parser
   [lexer]
   {:rules {}
@@ -13,13 +15,21 @@
 
 (defn ident-exists
   [parser ident]
-  (or (get-in parser [:rules ident]) (lex/ident-exists (:lexer parser) ident)))
+  (or (get-in parser [:rules ident])
+      (lex/ident-exists (:lexer parser) ident)
+      (contains? reserved-keywords ident)))
+
+(defn- add-rule-unchecked
+  "add a rule, without checking if the ident exists.
+  This should only ever be used to insert reserved keywords as rules, for example for `:$shell`"
+  [parser ident rule]
+  (assoc-in parser [:rules ident] (rl/new-rule ident rule)))
 
 (defn add-rule
   [parser ident rule]
   (if (ident-exists parser ident)
     (throw (ex-info "ident already exists" {:ident ident}))
-    (assoc-in parser [:rules ident] (rl/new-rule ident rule))))
+    (add-rule-unchecked parser ident rule)))
 
 (defn get-rule
   [parser ident]
@@ -88,7 +98,7 @@
 
   NOTE: that the edges are NOT returned, as they can be quickly identified using the `(state-get-shifts state)` function"
   [parser start-rule-ident]
-  (let [parser (add-rule parser :$shell [start-rule-ident])
+  (let [parser (add-rule-unchecked parser :$shell [start-rule-ident])
         rule (get-rule parser :$shell)
         shell-dotted (dot/new-dotted-rule :$shell (first (rl/rule-rules rule)))
         shell-rule #{shell-dotted}]
