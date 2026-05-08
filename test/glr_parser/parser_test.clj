@@ -2,8 +2,7 @@
   (:require
    [clojure.test :as t :refer [deftest testing is]]
    [glr-parser.lexer :as lex]
-   [glr-parser.parser.parser :as par]
-   [glr-parser.parser.dotted :as dot]))
+   [glr-parser.parser.parser :as par]))
 
 (deftest parser-test-1
   (testing "Build simple parser out of lecture. Test if works, generate graph"
@@ -19,5 +18,5 @@
                                        [:a :A :b :S]
                                        [:d]])
                      (par/add-rule :A [:e]))
-          states (dot/build-graph-states parser :S)]
-      (dot/to-graphviz states))))
+          states (par/build-graph-states parser :S)]
+      (par/to-graphviz states))))
