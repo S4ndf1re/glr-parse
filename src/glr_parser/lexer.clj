@@ -16,14 +16,14 @@
    :input-string (vec input-string)
    :filename filename})
 
-(defn- already-contains-const-or-rule
+(defn ident-exists
   [lexer ident]
   (or (get-in lexer [:consts ident]) (get-in lexer [:rules ident])))
 
 (defn add-const
   "Add a new constant, ensuring priority over rules for equal length matches"
   [lexer ident constant]
-  (if (already-contains-const-or-rule lexer ident)
+  (if (ident-exists lexer ident)
     (throw (ex-info "constant already exists" {:type :const-exists :ident ident :constant constant}))
     (assoc-in lexer [:consts ident] {:ident ident
                                      :constant (clojure.string/trim constant)
@@ -32,7 +32,7 @@
 (defn add-rule
   "Add a new rule, consisting of a regex. When both a constant and regex rule match with the same lenght, the constant has priority. Otherwise, the longest match is chosen"
   [lexer ident rule & {:keys [precedence] :or {precedence 0}}]
-  (if (already-contains-const-or-rule lexer ident)
+  (if (ident-exists lexer ident)
     (throw (ex-info "rule already exists" {:type :rule-exists :ident ident :rule rule}))
     (assoc-in lexer [:rules ident] {:ident ident :rule rule :precedence precedence})))
 
@@ -45,7 +45,7 @@
   [lexer]
   (->> lexer
        :consts
-       (map :constant)
+       (map (comp :constant val))
        (frequencies)
        (remove (comp #{1} val))
        (map key)))
