@@ -11,8 +11,9 @@
     l))
 
 (defn new-dotted-rule
-  ([ident rule]
+  ([ident variant rule]
    {:ident ident
+    :variant variant
     :rule (assert-1d-list rule)
     :dot 0}))
 

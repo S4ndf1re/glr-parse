@@ -8,7 +8,11 @@
 
 (def reserved-keywords #{:$shell})
 
-(defn new-parser
+(defprotocol LR-Parser
+  (validate [this] "validate the parser, checking if all gotos are part of either the lexer or the parser")
+  (parse-til-eof [this]))
+
+(defn new-parser-builder
   [lexer]
   {:rules {}
    :lexer lexer})
@@ -22,19 +26,19 @@
 (defn- add-rule-unchecked
   "add a rule, without checking if the ident exists.
   This should only ever be used to insert reserved keywords as rules, for example for `:$shell`"
-  [parser ident rule]
-  (assoc-in parser [:rules ident] (rl/new-rule ident rule)))
+  [parser-builder ident rule]
+  (assoc-in parser-builder [:rules ident] (rl/new-rule ident rule)))
 
 (defn add-rule
-  [parser ident rule]
-  (if (ident-exists parser ident)
+  [parser-builder ident rule]
+  (if (ident-exists parser-builder ident)
     (throw (ex-info "ident already exists" {:ident ident}))
-    (add-rule-unchecked parser ident rule)))
+    (add-rule-unchecked parser-builder ident rule)))
 
 (defn get-rule
-  [parser ident]
+  [parser-builder ident]
   (if ident
-    (get-in parser [:rules ident])
+    (get-in parser-builder [:rules ident])
     nil))
 
 (defn build-closure
@@ -52,8 +56,8 @@
        (let [next-rule-ident (dot/get-next v)
              parser-rule (get-rule parser next-rule-ident)]
          (if (and (not (contains? closure v)) parser-rule)
-           (let [direct-closure (into #{} (map #(dot/new-dotted-rule next-rule-ident %)
-                                               (rl/rule-rules parser-rule)))]
+           (let [direct-closure (into #{} (map-indexed (fn [idx v] (dot/new-dotted-rule next-rule-ident idx v))
+                                                       (rl/rule-rules parser-rule)))]
              (recur vs (set/union direct-closure closure)))
            (recur vs closure)))
        closure))))
@@ -97,17 +101,17 @@
   The Head is always a set of dotted items, directly identifying the state, hence all keys of the states map are sets of dotted items.
 
   NOTE: that the edges are NOT returned, as they can be quickly identified using the `(state-get-shifts state)` function"
-  [parser start-rule-ident]
-  (let [parser (add-rule-unchecked parser :$shell [start-rule-ident])
-        rule (get-rule parser :$shell)
-        shell-dotted (dot/new-dotted-rule :$shell (first (rl/rule-rules rule)))
+  [parser-builder start-rule-ident]
+  (let [parser-builder (add-rule-unchecked parser-builder :$shell [start-rule-ident])
+        rule (get-rule parser-builder :$shell)
+        shell-dotted (dot/new-dotted-rule :$shell 0 (first (rl/rule-rules rule)))
         shell-rule #{shell-dotted}]
     (loop [next-id 0
            [v & vs] (list shell-rule)
            states {}]
       (if v
         (if-not (get states v)
-          (let [state (new-state parser next-id v)
+          (let [state (new-state parser-builder next-id v)
                 shifts (state-get-shifts state)
                 to-visit (reduce (fn [acc [_ v]] (conj acc v)) vs shifts)]
             (recur (inc next-id) to-visit (assoc states v state)))
@@ -160,3 +164,13 @@
                                           :flags #{:directed}})
                       {:filename "img/lr_0.png"
                        :layout-algorithm :neato})))
+
+(defn todo
+  [& message]
+  (throw (ex-info (str "todo: " message) {:message message})))
+
+(deftype LR-0-Parser [lexer rules table]
+  LR-Parser
+  ;; TODO(Jan): validate the parser table and all rules
+  (validate [_this] true)
+  (parse-til-eof [_this] (todo "unimplemented")))

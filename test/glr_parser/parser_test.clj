@@ -13,7 +13,7 @@
                     (lex/add-const :d "d")
                     (lex/add-const :e "e")
                     (lex/build))
-          parser (-> (par/new-parser lexer)
+          parser (-> (par/new-parser-builder lexer)
                      (par/add-rule :S [[:S :a :A :b :S :c :S]
                                        [:a :A :b :S]
                                        [:d]])
