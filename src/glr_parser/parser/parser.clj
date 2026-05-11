@@ -41,6 +41,53 @@
     (get-in parser-builder [:rules ident])
     nil))
 
+(declare first-set)
+
+(defn- first-set-alternative
+  "Build the first set out of a single vector of keywords (i.e. a single rule).
+  If no rule alternative is provided, a transducer is returned instead"
+  ([parser-builder] (fn [rf]
+                      (fn
+                        ([] (rf))
+                        ([acc] (rf acc))
+                        ([acc rule-alternative] (rf acc (first-set-alternative parser-builder rule-alternative))))))
+  ([parser-builder alternative-list]
+   (let [first-elem (first alternative-list)]
+     (if (get-rule parser-builder first-elem)
+       (first-set parser-builder first-elem)
+       #{first-elem}))))
+
+(defn first-set
+  "collect all terminals that are at first position of the rule.
+  The rule is extracted from the parser-builder and is expected to be a non terminal.
+  The rule-ident specifies the rule in question"
+  [parser-builder rule-ident]
+  (let [rule (get-rule parser-builder rule-ident)]
+    (if rule
+      (transduce (first-set-alternative parser-builder) clojure.set/union #{} (rl/rule-rules rule))
+      nil)))
+
+(defn- follow-set-single
+  "Build the follow set after the dotted item for a single dotted item.
+  If no dotted item is provided, return a transducer instead"
+  ([parser-builder]
+   (fn [rf]
+     (fn
+       ([] (rf))
+       ([acc] (rf acc))
+       ([acc curr] (rf acc (follow-set-single parser-builder curr))))))
+  ([parser-builder dotted-rule]
+   (let [dotted-rule (dot/dotted-advance dotted-rule)]
+     (if-not (dot/is-at-end? dotted-rule)
+       (first-set-alternative parser-builder
+                              (dot/get-rest dotted-rule))
+       (dot/get-lookahead dotted-rule)))))
+
+(defn follow-set
+  "Build the follow set for multiple dotted rules. The follow set is build for the dotted position"
+  [parser-builder dotted-rules]
+  (transduce (follow-set-single parser-builder) clojure.set/union #{} dotted-rules))
+
 (defn build-closure
   "Transform a dotted-rule to a closure of dotted items. If the rule is not supplied, return a transducer"
   ([parser] (fn [rf]
@@ -52,13 +99,22 @@
   ([parser dotted-rule]
    (loop [[v & vs] (list dotted-rule)
           closure #{}]
+     (println "V2:" v)
      (if v
        (let [next-rule-ident (dot/get-next v)
              parser-rule (get-rule parser next-rule-ident)]
+         (println "V:"  v)
+         (println "Next Rule ident:"  next-rule-ident)
+         (println "Parser Rule:"  parser-rule)
          (if (and (not (contains? closure v)) parser-rule)
-           (let [direct-closure (into #{} (map-indexed (fn [idx v] (dot/new-dotted-rule next-rule-ident idx v))
-                                                       (rl/rule-rules parser-rule)))]
-             (recur vs (set/union direct-closure closure)))
+           (let [direct-closure (map-indexed
+                                 (fn [idx inner]
+                                   (dot/new-dotted-rule next-rule-ident
+                                                        idx
+                                                        inner
+                                                        (follow-set-single parser v)))
+                                 (rl/rule-rules parser-rule))]
+             (recur vs (dot/merge-into-closure closure direct-closure)))
            (recur vs closure)))
        closure))))
 
@@ -66,7 +122,10 @@
   "Define a new lr parser graph state. the connections are defined by the groups that can be extracted from the closure.
   A state may be identified by id after building the parser table, or by the head while building the parsert table and graph"
   [parser id head]
-  (let [closure (transduce (build-closure parser) set/union #{} head)]
+  (let [closure (transduce (build-closure parser) dot/merge-into-closure #{} head)]
+    (println "State id:" id)
+    (println "Head:" head)
+    (println "Closure:" closure)
     {:id id
      :head head
      :closure closure}))
@@ -78,15 +137,22 @@
        (group-by dot/get-next)
        (reduce-kv (fn [acc k v] (assoc acc k (into #{} v))) {})))
 
+(defn- inspect
+  [x]
+  (prn x)
+  x)
+
 (defn state-get-shifts
   "Get all shifts, with the already advanced dotted items"
   [state]
-  (-> (set/union (:head state) (:closure state))
+  (-> (dot/merge-into-closure (:head state) (into [] (:closure state)))
       (group-by-ident)
       (dissoc nil)
+      (inspect)
       (#(reduce-kv (fn [acc k v]
                      (assoc acc k
-                            (into #{} (map dot/dotted-advance v))))
+                            (dot/merge-into-closure #{} (map dot/dotted-advance v))))
+
                    {} %))))
 
 (defn state-get-reduces
@@ -104,7 +170,7 @@
   [parser-builder start-rule-ident]
   (let [parser-builder (add-rule-unchecked parser-builder :$shell [start-rule-ident])
         rule (get-rule parser-builder :$shell)
-        shell-dotted (dot/new-dotted-rule :$shell 0 (first (rl/rule-rules rule)))
+        shell-dotted (dot/new-dotted-rule :$shell 0 (first (rl/rule-rules rule)) #{:eof})
         shell-rule #{shell-dotted}]
     (loop [next-id 0
            [v & vs] (list shell-rule)
@@ -113,6 +179,7 @@
         (if-not (get states v)
           (let [state (new-state parser-builder next-id v)
                 shifts (state-get-shifts state)
+                _ (println "Shifts:" shifts)
                 to-visit (reduce (fn [acc [_ v]] (conj acc v)) vs shifts)]
             (recur (inc next-id) to-visit (assoc states v state)))
           (recur next-id vs states))
@@ -162,15 +229,4 @@
                                                                :node {:label ""
                                                                       :penwidth "1"}}
                                           :flags #{:directed}})
-                      {:filename "img/lr_0.png"
-                       :layout-algorithm :neato})))
-
-(defn todo
-  [& message]
-  (throw (ex-info (str "todo: " message) {:message message})))
-
-(deftype LR-0-Parser [lexer rules table]
-  LR-Parser
-  ;; TODO(Jan): validate the parser table and all rules
-  (validate [_this] true)
-  (parse-til-eof [_this] (todo "unimplemented")))
+                      {:filename "img/lr_0.png"})))
