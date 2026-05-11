@@ -4,7 +4,8 @@
   :license {:name "EPL-2.0 OR GPL-2.0-or-later WITH Classpath-exception-2.0"
             :url "https://www.eclipse.org/legal/epl-2.0/"}
   :dependencies [[org.clojure/clojure "1.12.2"]
-                 [com.phronemophobic/clj-graphviz "0.6.4"]]
+                 [com.phronemophobic/clj-graphviz "0.6.4"]
+                 [metosin/malli "0.20.1"]]
   :main ^:skip-aot glr-parser.core
   :target-path "target/%s"
   :profiles {:uberjar {:aot :all
