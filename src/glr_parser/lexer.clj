@@ -5,12 +5,9 @@
    [clojure.string :as s]
    [glr-parser.graph.dfa :as dfa]
    [glr-parser.graph.automaton :as autom]
-   [glr-parser.util :refer [throw-on-schema-invalid]]))
+   [glr-parser.util :refer [throw-on-schema-invalid Ident]]))
 
 (def reserved-keywords #{:eof})
-
-(def Ident
-  :keyword)
 
 (def Const
   :string)

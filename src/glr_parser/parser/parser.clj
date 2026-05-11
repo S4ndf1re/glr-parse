@@ -4,9 +4,15 @@
    [com.phronemophobic.clj-graphviz :as viz]
    [glr-parser.lexer :as lex]
    [glr-parser.parser.dotted :as dot]
-   [glr-parser.parser.rule :as rl]))
+   [glr-parser.parser.rule :as rl]
+   [glr-parser.util :refer [throw-on-schema-invalid Ident]]))
 
 (def reserved-keywords #{:$shell})
+
+(def ParserBuilder
+  [:map
+   [:lexer #'lex/Lexer]
+   [:rules [:map-of #'Ident #'rl/Rule]]])
 
 (defprotocol LR-Parser
   (validate [this] "validate the parser, checking if all gotos are part of either the lexer or the parser")
@@ -27,7 +33,10 @@
   "add a rule, without checking if the ident exists.
   This should only ever be used to insert reserved keywords as rules, for example for `:$shell`"
   [parser-builder ident rule]
-  (assoc-in parser-builder [:rules ident] (rl/new-rule ident rule)))
+  (throw-on-schema-invalid Ident ident)
+  (-> parser-builder
+      (assoc-in [:rules ident] (rl/new-rule ident rule))
+      (#(throw-on-schema-invalid ParserBuilder %))))
 
 (defn add-rule
   [parser-builder ident rule]
@@ -129,7 +138,6 @@
   (->> dotted-set
        (group-by dot/get-next)
        (reduce-kv (fn [acc k v] (assoc acc k (into #{} v))) {})))
-
 
 (defn state-get-shifts
   "Get all shifts, with the already advanced dotted items"

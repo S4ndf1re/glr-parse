@@ -1,10 +1,7 @@
 (ns glr-parser.parser.rule
-  (:require [glr-parser.util :refer [throw-on-schema-invalid]]))
+  (:require [glr-parser.util :refer [throw-on-schema-invalid Ident]]))
 
-(def Ident
-  [:keyword])
-
-(def RuleList
+(def RuleAlternative
   [:cat
    [:*
     :keyword]
@@ -12,10 +9,25 @@
     :keyword
     [:fn fn?]]])
 
-(def Rule
+(def StrictRuleAlternative
+  [:vector :keyword])
+
+(def StrictRuleList
+  [:vector #'StrictRuleAlternative])
+
+(def StrictCallbacks
+  [:vector [:fn fn?]])
+
+(def RuleList
   [:or
-   #'RuleList
-   [:sequential #'RuleList]])
+   #'RuleAlternative
+   [:sequential #'RuleAlternative]])
+
+(def Rule
+  [:map
+   [:ident #'Ident]
+   [:rules #'StrictRuleList]
+   [:callbacks #'StrictCallbacks]])
 
 (defn- is-nested?
   "Check if the list is nested"
@@ -44,14 +56,14 @@
 
 (defn new-rule
   [ident rule]
-  (throw-on-schema-invalid Rule rule)
+  (throw-on-schema-invalid RuleList rule)
   (throw-on-schema-invalid Ident ident)
   (let [alternatives (rule-alternatives rule)
         callbacks (mapv get-last-if-callback alternatives)
         rules (mapv get-all-except-last-if-callback alternatives)]
-    {:ident ident
-     :rules rules
-     :callbacks callbacks}))
+    (throw-on-schema-invalid Rule {:ident ident
+                                   :rules rules
+                                   :callbacks callbacks})))
 
 (defn rule-ident
   [rule]

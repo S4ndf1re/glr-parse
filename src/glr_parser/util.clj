@@ -3,6 +3,9 @@
    [malli.core :as m]
    [malli.error :as me]))
 
+(def Ident
+  :keyword)
+
 (defn throw-on-schema-invalid
   [schema value]
   (cond
