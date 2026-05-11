@@ -7,6 +7,9 @@
 (defprotocol ToNfa
   (to-nfa [this graph start-state end-state meta] "Convert to a nfa subgraph"))
 
+(def RegEx
+  [:fn (fn [x] (satisfies? ToNfa x))])
+
 (defrecord Constant [constant]
   ToNfa
   (to-nfa [_this graph start-state end-state _meta]

@@ -99,13 +99,9 @@
   ([parser dotted-rule]
    (loop [[v & vs] (list dotted-rule)
           closure #{}]
-     (println "V2:" v)
      (if v
        (let [next-rule-ident (dot/get-next v)
              parser-rule (get-rule parser next-rule-ident)]
-         (println "V:"  v)
-         (println "Next Rule ident:"  next-rule-ident)
-         (println "Parser Rule:"  parser-rule)
          (if (and (not (contains? closure v)) parser-rule)
            (let [direct-closure (map-indexed
                                  (fn [idx inner]
@@ -123,9 +119,6 @@
   A state may be identified by id after building the parser table, or by the head while building the parsert table and graph"
   [parser id head]
   (let [closure (transduce (build-closure parser) dot/merge-into-closure #{} head)]
-    (println "State id:" id)
-    (println "Head:" head)
-    (println "Closure:" closure)
     {:id id
      :head head
      :closure closure}))
@@ -137,10 +130,6 @@
        (group-by dot/get-next)
        (reduce-kv (fn [acc k v] (assoc acc k (into #{} v))) {})))
 
-(defn- inspect
-  [x]
-  (prn x)
-  x)
 
 (defn state-get-shifts
   "Get all shifts, with the already advanced dotted items"
@@ -148,7 +137,6 @@
   (-> (dot/merge-into-closure (:head state) (into [] (:closure state)))
       (group-by-ident)
       (dissoc nil)
-      (inspect)
       (#(reduce-kv (fn [acc k v]
                      (assoc acc k
                             (dot/merge-into-closure #{} (map dot/dotted-advance v))))
@@ -179,7 +167,6 @@
         (if-not (get states v)
           (let [state (new-state parser-builder next-id v)
                 shifts (state-get-shifts state)
-                _ (println "Shifts:" shifts)
                 to-visit (reduce (fn [acc [_ v]] (conj acc v)) vs shifts)]
             (recur (inc next-id) to-visit (assoc states v state)))
           (recur next-id vs states))
@@ -230,3 +217,13 @@
                                                                       :penwidth "1"}}
                                           :flags #{:directed}})
                       {:filename "img/lr_0.png"})))
+
+(def LR1ParserTable
+  [:map
+   [:start-state :int]
+   [:lexer :any]
+   []])
+
+(defn to-lr-1
+  [parser-builder start-rule-ident]
+  (let [states (build-graph-states parser-builder start-rule-ident)]))

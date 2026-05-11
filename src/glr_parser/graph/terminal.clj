@@ -66,4 +66,4 @@
 
 (defn is-terminal?
   [terminal]
-  (satisfies?  Terminal terminal))
+  (satisfies? Terminal terminal))

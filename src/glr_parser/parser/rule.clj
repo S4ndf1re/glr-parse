@@ -1,6 +1,5 @@
 (ns glr-parser.parser.rule
-  (:require [malli.core :as m]
-            [malli.error :as me]))
+  (:require [glr-parser.util :refer [throw-on-schema-invalid]]))
 
 (def Ident
   [:keyword])
@@ -45,15 +44,14 @@
 
 (defn new-rule
   [ident rule]
-  (cond
-    (not (m/validate Rule rule)) (throw (ex-info (str (me/humanize (m/explain Rule rule))) {}))
-    (not (m/validate Ident ident)) (throw (ex-info (str (me/humanize (m/explain Ident ident))) {}))
-    :else (let [alternatives (rule-alternatives rule)
-                callbacks (mapv get-last-if-callback alternatives)
-                rules (mapv get-all-except-last-if-callback alternatives)]
-            {:ident ident
-             :rules rules
-             :callbacks callbacks})))
+  (throw-on-schema-invalid Rule rule)
+  (throw-on-schema-invalid Ident ident)
+  (let [alternatives (rule-alternatives rule)
+        callbacks (mapv get-last-if-callback alternatives)
+        rules (mapv get-all-except-last-if-callback alternatives)]
+    {:ident ident
+     :rules rules
+     :callbacks callbacks}))
 
 (defn rule-ident
   [rule]

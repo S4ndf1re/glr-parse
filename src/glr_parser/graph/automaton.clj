@@ -23,6 +23,9 @@
   (clear-edges [this] "clear all edges")
   (apply-meta [this meta] "apply the metadata to all states"))
 
+(def AutomatonType
+  [:fn (fn [x] (satisfies? Automaton x))])
+
 (defn- map-state-id-to-node-id
   "Produce \"q<n>\", where <n> is the parameter state-id.
   This can later be used for identifying graphviz nodes by id"

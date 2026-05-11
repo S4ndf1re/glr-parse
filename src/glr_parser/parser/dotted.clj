@@ -1,9 +1,8 @@
 (ns glr-parser.parser.dotted
-  (:require [clojure.string :as s]
-            [malli.core :as m]
-            [malli.error :as me]
-            [clojure.set :as set]
-            [clojure.string :as str]))
+  (:require
+   [clojure.set :as set]
+   [clojure.string :as str]
+   [glr-parser.util :refer [throw-on-schema-invalid]]))
 
 ;; NOTE(jan): Rules are lists. For now. Lets see how this will change in the future.
 ;; NOTE(jan): if a rule has multiple alternatives, it is a list of lists
@@ -32,9 +31,7 @@
                      :rule (assert-1d-list rule)
                      :dot 0
                      :lookahead lookahead}]
-    (if-not (m/validate DottedItem dotted-rule)
-      (throw (ex-info (str (me/humanize (m/explain DottedItem dotted-rule))) {}))
-      dotted-rule)))
+    (throw-on-schema-invalid DottedItem dotted-rule)))
 
 (defn get-ident
   [dotted]
@@ -71,7 +68,7 @@
 
 (defn- dotted-rule-to-string
   [rule]
-  (let [rule-str (s/join "" (map name (:rule rule)))
+  (let [rule-str (str/join "" (map name (:rule rule)))
         rule-str (str (subs rule-str 0 (:dot rule)) "." (subs rule-str (:dot rule)))
         ident-str (name (:ident rule))]
     (str ident-str " := " rule-str "\\| \\{ " (str/join "," (map name (:lookahead rule))) " \\}")))
@@ -83,7 +80,6 @@
 (defn- dotted-no-lookahead
   "Convert a dotted item to a dotted item without lookahead"
   [dotted]
-  (println "Dotted:" dotted)
   {:ident (:ident dotted)
    :variant (:variant dotted)
    :rule (:rule dotted)

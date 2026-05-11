@@ -3,15 +3,53 @@
    [glr-parser.regex :as rgx]
    [glr-parser.graph.nfa :as nfa]
    [clojure.string :as s]
-   [glr-parser.graph.dfa :as dfa]))
+   [glr-parser.graph.dfa :as dfa]
+   [glr-parser.graph.automaton :as autom]
+   [glr-parser.util :refer [throw-on-schema-invalid]]))
 
 (def reserved-keywords #{:eof})
+
+(def Ident
+  :keyword)
+
+(def Const
+  :string)
+
+(def InnerConst
+  [:map
+   [:ident #'Ident]
+   [:constant #'Const]
+   [:length :int]])
+
+(def Rule
+  #'rgx/RegEx)
+
+(def InnerRule
+  [:map
+   [:ident #'Ident]
+   [:rule #'Rule]
+   [:precedence :int]])
+
+(def Callback
+  [:fn (fn [x] (fn? x))])
+
+(def Lexer
+  [:map
+   [:consts [:map-of #'Ident #'InnerConst]]
+   [:rules [:map-of #'Ident #'InnerRule]]
+   [:callbacks [:map-of #'Ident #'Callback]]
+   [:rules-graph [:maybe #'autom/AutomatonType]]
+   [:skips [:set #'Ident]]
+   [:current-idx :int]
+   [:input-string [:vector char?]]
+   [:filename :string]])
 
 (defn new-empty
   "Build a new lexer, that accepts both the consts and rules. Skip rules that are contained in skips by name"
   [input-string filename]
   {:consts {}
    :rules {}
+   :callbacks {}
    :rules-graph nil
    :skips #{}
    :current-idx 0
@@ -24,24 +62,48 @@
 
 (defn add-const
   "Add a new constant, ensuring priority over rules for equal length matches"
-  [lexer ident constant]
-  (if (ident-exists lexer ident)
-    (throw (ex-info "constant already exists" {:type :const-exists :ident ident :constant constant}))
-    (assoc-in lexer [:consts ident] {:ident ident
-                                     :constant (clojure.string/trim constant)
-                                     :length (count (clojure.string/trim constant))})))
+  ([lexer ident constant]
+   (add-const lexer ident constant identity))
+  ([lexer ident constant callback]
+   (throw-on-schema-invalid Const constant)
+   (throw-on-schema-invalid Callback callback)
+   (throw-on-schema-invalid Ident ident)
+   (if (ident-exists lexer ident)
+     (throw (ex-info "constant already exists" {:type :const-exists :ident ident :constant constant}))
+     (-> lexer
+         (assoc-in [:consts ident] {:ident ident
+                                    :constant (clojure.string/trim constant)
+                                    :length (count (clojure.string/trim constant))})
+         (assoc-in [:callbacks ident] callback)
+         (#(throw-on-schema-invalid Lexer %))))))
 
 (defn add-rule
   "Add a new rule, consisting of a regex. When both a constant and regex rule match with the same lenght, the constant has priority. Otherwise, the longest match is chosen"
-  [lexer ident rule & {:keys [precedence] :or {precedence 0}}]
-  (if (ident-exists lexer ident)
-    (throw (ex-info "rule already exists" {:type :rule-exists :ident ident :rule rule}))
-    (assoc-in lexer [:rules ident] {:ident ident :rule rule :precedence precedence})))
+  ([lexer ident rule & {:keys [precedence callback] :or {precedence 0
+                                                         callback identity}}]
+   (throw-on-schema-invalid Rule rule)
+   (throw-on-schema-invalid Callback callback)
+   (throw-on-schema-invalid Ident ident)
+   (if (ident-exists lexer ident)
+     (throw (ex-info "rule already exists" {:type :rule-exists :ident ident :rule rule}))
+     (-> lexer
+         (assoc-in [:rules ident] {:ident ident :rule rule :precedence precedence})
+         (assoc-in [:callbacks ident] callback)
+         (#(throw-on-schema-invalid Lexer %))))))
 
 (defn add-skip
   "Add a rule or constant to the skip list"
   [lexer ident]
-  (assoc lexer :skips (conj (:skips lexer) ident)))
+  (throw-on-schema-invalid Ident ident)
+  (-> lexer
+      (assoc :skips (conj (:skips lexer) ident))
+      (#(throw-on-schema-invalid Lexer %))))
+
+(defn call-callback
+  [lexer ident raw-content]
+  (if (get-in lexer [:callbacks ident])
+    ((get-in lexer [:callbacks ident] identity) raw-content)
+    raw-content))
 
 (defn- duplicate-consts
   [lexer]
@@ -63,7 +125,8 @@
       (throw (ex-info "duplicate constants found" {:type :duplicate-consts
                                                    :duplicates duplicates}))
       (-> lexer
-          (assoc :rules-graph dfa-graph)))))
+          (assoc :rules-graph dfa-graph)
+          (#(throw-on-schema-invalid Lexer %))))))
 
 (defn- current-input
   [lexer]
@@ -106,11 +169,12 @@
     :else (throw (ex-info "CRITICAL: all cases checked already" {}))))
 
 (defn- new-token
-  [ident value start end]
+  [lexer ident value start end]
   {:ident ident
    :value (apply str value)
    :start start
-   :end end})
+   :end end
+   :data (call-callback lexer ident (apply str value))})
 
 (defn token-range
   "Get the start-end range in the form [start, end) for a token"
@@ -154,7 +218,7 @@
      (if ((:skips lexer) token)
        (advance (advance-lexer-to-idx lexer end))
        (list (advance-lexer-to-idx lexer end)
-             (new-token token (subvec (:input-string lexer) start end) start end)))))
+             (new-token lexer token (subvec (:input-string lexer) start end) start end)))))
   ([lexer n]
    (loop [n n
           tokens []
