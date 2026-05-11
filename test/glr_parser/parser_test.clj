@@ -18,5 +18,6 @@
                                        [:a :A :b :S]
                                        [:d]])
                      (par/add-rule :A [:e]))
-          states (par/build-graph-states parser :S)]
+          states (par/build-graph-states parser :S)
+          lr1-parser-table (par/to-lr-1 parser :S)]
       (par/to-graphviz states))))

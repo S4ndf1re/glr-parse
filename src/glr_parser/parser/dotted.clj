@@ -37,6 +37,10 @@
   [dotted]
   (:ident dotted))
 
+(defn get-variant
+  [dotted]
+  (:variant dotted))
+
 (defn get-rule
   [dotted]
   (:rule dotted))

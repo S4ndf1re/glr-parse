@@ -1,11 +1,12 @@
 (ns glr-parser.parser.parser
   (:require
+   [clojure.pprint :as pprint]
    [clojure.set :as set]
    [com.phronemophobic.clj-graphviz :as viz]
    [glr-parser.lexer :as lex]
    [glr-parser.parser.dotted :as dot]
    [glr-parser.parser.rule :as rl]
-   [glr-parser.util :refer [throw-on-schema-invalid Ident]]))
+   [glr-parser.util :refer [Ident throw-on-schema-invalid]]))
 
 (def reserved-keywords #{:$shell})
 
@@ -142,7 +143,7 @@
 (defn state-get-shifts
   "Get all shifts, with the already advanced dotted items"
   [state]
-  (-> (dot/merge-into-closure (:head state) (into [] (:closure state)))
+  (-> (dot/merge-into-closure (:head state) (:closure state))
       (group-by-ident)
       (dissoc nil)
       (#(reduce-kv (fn [acc k v]
@@ -154,7 +155,10 @@
 (defn state-get-reduces
   "Get all reduces"
   [state]
-  (get (group-by-ident (set/union (:head state) (:closure state))) nil))
+  (-> (dot/merge-into-closure (:head state) (:closure state))
+      (group-by-ident)
+      (get nil)
+      (#(dot/merge-into-closure #{} %))))
 
 (defn build-graph-states
   "Build the graph states, by determining the shell for the start rule, and building all shift (goto) states.
@@ -181,14 +185,23 @@
 
         states))))
 
-(defn- is-final-state
+(defn- is-first-state?
+  [state-key]
+  (seq (filter #(and (= (:dot %) 0) (= (:ident %) :$shell)) state-key)))
+
+(defn- is-final-state?
   [state-key]
   (seq (filter #(and (= (:dot %) 1) (= (:ident %) :$shell)) state-key)))
 
 (defn identify-accepting-state
   "Identify the accepting state, returing its key in the states list"
   [states]
-  (first (filter #(is-final-state %) (keys states))))
+  (first (filter #(is-final-state? %) (keys states))))
+
+(defn identify-first-state
+  "Identify the accepting state, returing its key in the states list"
+  [states]
+  (first (filter #(is-first-state? %) (keys states))))
 
 (defn- state-to-layout
   [state]
@@ -226,12 +239,73 @@
                                           :flags #{:directed}})
                       {:filename "img/lr_0.png"})))
 
+(def StateId
+  :int)
+
+(def Reduce
+  [:map
+   [:type [:enum :reduce]]
+   [:rule :keyword]
+   [:variant :int]
+   [:lookahead [:set :keyword]]])
+
+(def Shift
+  [:map
+   [:type [:enum :shift]]
+   [:next-state #'StateId]])
+
+(def Action
+  [:sequential
+   [:or
+    #'Reduce
+    #'Shift]])
+
+(def ActionSet
+  [:map-of :keyword #'Action])
+
 (def LR1ParserTable
   [:map
-   [:start-state :int]
-   [:lexer :any]
-   []])
+   [:start-state #'StateId]
+   [:accept-state #'StateId]
+   [:lexer #'lex/Lexer]
+   [:actions [:map-of #'StateId #'ActionSet]]])
+
+(defn- action-set-from-state
+  [states state]
+  (let [shifts (state-get-shifts state)
+        reduces (state-get-reduces state)
+        ;; For each shift, add to corresponding action
+        actions (reduce (fn [acc [k v]]
+                          (let [next-state (get states v)]
+                            (assoc acc k (conj (get acc k []) {:type :shift
+                                                               :next-state (:id next-state)}))))
+                        {} shifts)
+        ;; For each action, add all reduces
+        actions (reduce (fn [acc [k v]]
+                          (assoc acc k
+                                 (reduce (fn [acc r]
+                                           (conj acc
+                                                 {:type :reduce
+                                                  :rule (dot/get-ident r)
+                                                  :variant (dot/get-variant r)
+                                                  :lookahead (dot/get-lookahead r)}))
+                                         v reduces)))
+                        {} actions)]
+    actions))
 
 (defn to-lr-1
   [parser-builder start-rule-ident]
-  (let [states (build-graph-states parser-builder start-rule-ident)]))
+  (let [states (build-graph-states parser-builder start-rule-ident)
+        accept-state (get states (identify-accepting-state states))
+        start-state (get states (identify-first-state states))
+        actions (loop [[s & ss] states
+                       actions {}]
+                  (if s
+                    (recur ss (assoc actions (:id (val s)) (action-set-from-state states (val s))))
+                    actions))]
+    (throw-on-schema-invalid
+     LR1ParserTable
+     {:start-state (:id start-state)
+      :accept-state (:id accept-state)
+      :lexer (:lexer parser-builder)
+      :actions actions})))
