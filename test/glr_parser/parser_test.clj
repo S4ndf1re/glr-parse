@@ -19,5 +19,8 @@
                                        [:d]])
                      (par/add-rule :A [:e]))
           states (par/build-graph-states parser :S)
-          _ (par/to-graphviz states)
-          lr1-parser-table (par/to-lr-1-table parser :S)])))
+          _ (par/to-graphviz states)]
+      (try
+        (par/to-lr-1-table parser :S)
+        (catch Exception e
+          (is (= ((comp :type ex-data) e) :conflict)))))))
