@@ -78,7 +78,6 @@
   [kw]
   (when-not (is-repeat-or-optional? kw)
     (throw (ex-info "kw is not repeatable or optional" {:kw kw})))
-  (println kw)
   (let [stripped-kw (strip-last-char-from-kw kw)]
     (cond
       (is-zero-or-more? kw)
