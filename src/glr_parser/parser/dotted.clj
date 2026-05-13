@@ -18,17 +18,11 @@
    [:dot :int]
    [:lookahead [:set :keyword]]])
 
-(defn- assert-1d-list
-  [l]
-  (if (and (seqable? l) (seqable? (first l)))
-    (throw (ex-info "list cannot be 2d", {:list l}))
-    l))
-
 (defn new-dotted-rule
   [ident variant rule lookahead]
   (let [dotted-rule {:ident ident
                      :variant variant
-                     :rule (assert-1d-list rule)
+                     :rule rule
                      :dot 0
                      :lookahead lookahead}]
     (throw-on-schema-invalid DottedItem dotted-rule)))
@@ -72,10 +66,12 @@
 
 (defn- dotted-rule-to-string
   [rule]
-  (let [rule-str (str/join "" (map name (:rule rule)))
-        rule-str (str (subs rule-str 0 (:dot rule)) "." (subs rule-str (:dot rule)))
+  (let [rule-kw (:rule rule)
+        [rule-kw-start rule-kw-end] (split-at (:dot rule) rule-kw)
+        rule-kw (concat rule-kw-start [:.] rule-kw-end)
+        rule-str (str/join "" (map name rule-kw))
         ident-str (name (:ident rule))]
-    (str ident-str " := " rule-str "\\| \\{ " (str/join "," (map name (:lookahead rule))) " \\}")))
+    (str ident-str " := " rule-str " \\| \\{ " (str/join "," (map name (:lookahead rule))) " \\}")))
 
 (defn closure-to-string
   [closure]

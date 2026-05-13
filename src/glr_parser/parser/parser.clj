@@ -1,23 +1,46 @@
 (ns glr-parser.parser.parser
   (:require
-   [clojure.pprint :as pprint]
    [clojure.set :as set]
    [com.phronemophobic.clj-graphviz :as viz]
    [glr-parser.lexer :as lex]
    [glr-parser.parser.dotted :as dot]
    [glr-parser.parser.rule :as rl]
-   [glr-parser.util :refer [Ident throw-on-schema-invalid]]))
+   [glr-parser.util :refer [Ident throw-on-schema-invalid]]
+   [clojure.string :as s]))
 
 (def reserved-keywords #{:$shell})
+
+(defn- is-zero-or-more?
+  [kw]
+  (s/ends-with? (name kw) "*"))
+
+(defn- is-one-or-more?
+  [kw]
+  (s/ends-with? (name kw) "+"))
+
+(defn- is-optional?
+  [kw]
+  (s/ends-with? (name kw) "?"))
+
+(defn- is-repeat-or-optional?
+  [kw]
+  (or (is-zero-or-more? kw)
+      (is-one-or-more? kw)
+      (is-optional? kw)))
+
+(defn- is-valid-input-rule-ident?
+  [kw]
+  (not (is-repeat-or-optional? kw)))
+
+(def InputRuleIdent
+  [:and
+   #'Ident
+   [:fn is-valid-input-rule-ident?]])
 
 (def ParserBuilder
   [:map
    [:lexer #'lex/Lexer]
    [:rules [:map-of #'Ident #'rl/Rule]]])
-
-(defprotocol LR-Parser
-  (validate [this] "validate the parser, checking if all gotos are part of either the lexer or the parser")
-  (parse-til-eof [this]))
 
 (defn new-parser-builder
   [lexer]
@@ -30,26 +53,82 @@
       (lex/ident-exists (:lexer parser) ident)
       (contains? reserved-keywords ident)))
 
-(defn- add-rule-unchecked
-  "add a rule, without checking if the ident exists.
-  This should only ever be used to insert reserved keywords as rules, for example for `:$shell`"
-  [parser-builder ident rule]
-  (throw-on-schema-invalid Ident ident)
-  (-> parser-builder
-      (assoc-in [:rules ident] (rl/new-rule ident rule))
-      (#(throw-on-schema-invalid ParserBuilder %))))
-
-(defn add-rule
-  [parser-builder ident rule]
-  (if (ident-exists parser-builder ident)
-    (throw (ex-info "ident already exists" {:ident ident}))
-    (add-rule-unchecked parser-builder ident rule)))
-
 (defn get-rule
   [parser-builder ident]
   (if ident
     (get-in parser-builder [:rules ident])
     nil))
+
+(defn- add-rule-unchecked
+  "add a rule, without checking if the ident exists.
+  This should only ever be used to insert reserved keywords as rules, for example for `:$shell`"
+  [parser-builder ident rule]
+  (throw-on-schema-invalid Ident ident)
+  (when (get-in parser-builder [:rules ident])
+    (throw (ex-info "keyword already exists in rules" {:kw ident})))
+  (-> parser-builder
+      (assoc-in [:rules ident] (rl/new-rule ident rule))
+      (#(throw-on-schema-invalid ParserBuilder %))))
+
+(defn- strip-last-char-from-kw
+  [kw]
+  (keyword (apply str (drop-last (name kw)))))
+
+(defn- rule-from-repeat-or-optional
+  [kw]
+  (when-not (is-repeat-or-optional? kw)
+    (throw (ex-info "kw is not repeatable or optional" {:kw kw})))
+  (println kw)
+  (let [stripped-kw (strip-last-char-from-kw kw)]
+    (cond
+      (is-zero-or-more? kw)
+      [[stripped-kw kw]
+       []]
+          ;;
+      (is-one-or-more? kw)
+      [stripped-kw (keyword (str (name stripped-kw) "*"))]
+          ;;
+      (is-optional? kw)
+      [[stripped-kw]
+       []])))
+
+(defn- normalize-rule-alternative
+  [parser-builder rule-alternative]
+  (loop [pb parser-builder
+         [i & is] rule-alternative
+         added-rules '()]
+    (if i
+      (if (and (is-repeat-or-optional? i) (not (get-rule pb i)))
+        (let [pb (add-rule-unchecked pb i (rule-from-repeat-or-optional i))]
+          (recur pb
+                 is
+                 (conj added-rules (get-rule pb i))))
+        (recur pb is added-rules))
+      (list pb added-rules))))
+
+(defn- normalize-rule
+  [parser-builder rule]
+  (loop [[r & rs] (list rule)
+         pb parser-builder]
+    (if r
+      (let [[pb rs] (reduce (fn [[pb added-rules] rule-alternative]
+                              (let [[pb to-add] (normalize-rule-alternative pb rule-alternative)]
+                                (list pb (concat added-rules to-add))))
+                            [pb rs]
+                            (rl/rule-rules r))]
+        (recur rs pb))
+      pb)))
+
+(defn add-rule
+  [parser-builder ident rule]
+  (throw-on-schema-invalid InputRuleIdent ident)
+  (if (ident-exists parser-builder ident)
+    (throw (ex-info "ident already exists" {:ident ident}))
+    (let [parser-builder (add-rule-unchecked parser-builder ident rule)
+          added-rule (get-rule parser-builder ident)]
+      (-> parser-builder
+          (normalize-rule added-rule)
+          (#(throw-on-schema-invalid ParserBuilder %))))))
 
 (declare first-set)
 
@@ -89,8 +168,13 @@
   ([parser-builder dotted-rule]
    (let [dotted-rule (dot/dotted-advance dotted-rule)]
      (if-not (dot/is-at-end? dotted-rule)
-       (first-set-alternative parser-builder
-                              (dot/get-rest dotted-rule))
+       (let [first-set (first-set-alternative parser-builder
+                                              (dot/get-rest dotted-rule))]
+         (if-not (contains? first-set nil)
+           first-set
+           (-> first-set
+               (disj nil)
+               (clojure.set/union (dot/get-lookahead dotted-rule)))))
        (dot/get-lookahead dotted-rule)))))
 
 (defn follow-set
@@ -108,20 +192,22 @@
 
   ([parser dotted-rule]
    (loop [[v & vs] (list dotted-rule)
-          closure #{}]
+          closure #{}
+          visited #{}]
      (if v
        (let [next-rule-ident (dot/get-next v)
              parser-rule (get-rule parser next-rule-ident)]
-         (if (and (not (contains? closure v)) parser-rule)
+         (if (and (not (contains? visited v)) parser-rule)
            (let [direct-closure (map-indexed
                                  (fn [idx inner]
                                    (dot/new-dotted-rule next-rule-ident
                                                         idx
                                                         inner
                                                         (follow-set-single parser v)))
-                                 (rl/rule-rules parser-rule))]
-             (recur vs (dot/merge-into-closure closure direct-closure)))
-           (recur vs closure)))
+                                 (rl/rule-rules parser-rule))
+                 merged-closure (dot/merge-into-closure closure direct-closure)]
+             (recur (concat vs (seq direct-closure)) merged-closure (conj visited v)))
+           (recur vs closure (conj visited v))))
        closure))))
 
 (defn new-state
@@ -208,13 +294,16 @@
   (let [head-str (dot/closure-to-string (:head state))
         closure-str (dot/closure-to-string (:closure state))
         id-str (str "q" (:id state))]
-    (str "{ " id-str "|" head-str "|" closure-str " }")))
+    (str id-str \newline
+         "---" \newline
+         head-str \newline
+         "---" \newline
+         closure-str)))
 
 (defn- map-state-to-node
   [state start-state]
   {:label (state-to-layout state)
    :id (str "q" (:id state))
-   :shape "record"
    :penwidth (if-not (= (:head state) start-state) "1" "3")})
 
 (defn- state-to-edges
@@ -224,8 +313,7 @@
                            (get states)
                            (#(merge {:from (str "q" (:id state))
                                      :to (str "q" (:id %))
-                                     :label (name k)
-                                     :len "2"}))))
+                                     :label (name k)}))))
           shifts)))
 
 (defn to-graphviz
@@ -237,7 +325,8 @@
                                                                :node {:label ""
                                                                       :penwidth "1"}}
                                           :flags #{:directed}})
-                      {:filename "img/lr_0.png"})))
+                      {:filename "img/lr_0.png"
+                       :layout-algorithm :dot})))
 
 (def StateId
   :int)
@@ -270,6 +359,52 @@
    [:lexer #'lex/Lexer]
    [:actions [:map-of #'StateId #'ActionSet]]])
 
+(defn- new-conflict-or-nil
+  "Build a new conflict for a state, a shift, multiple reduces and an intersecting lookahead set
+  that is valid for both the shift and all reduces."
+  [state-id shift reduces lookahead-intersection]
+  (cond (and (not shift) (>= (count reduces) 2)) {:type :reduce-reduce
+                                                  :state state-id
+                                                  :alternatives reduces
+                                                  :next-token lookahead-intersection}
+        (and shift (>= (count reduces) 1)) {:type :shift-reduce
+                                            :state state-id
+                                            :shift shift
+                                            :reduces reduces
+                                            :next-token lookahead-intersection}
+        :else nil))
+
+(defn- action-conflict
+  [state-id token action]
+  (let [shifts (filter (comp #(= % :shift) :type) action)
+        shift (first shifts)
+        reduces (->> action
+                     (filter (comp #(= % :reduce) :type))
+                     (filter (comp #(contains? % token) :lookahead)))]
+    (if (> (count shifts) 1)
+      (throw (ex-info "Invalid action list: two shifts appear for same token" {:state state-id}))
+      (new-conflict-or-nil state-id shift reduces token))))
+
+(defn- action-set-conflict
+  [state-id action-set]
+  (->> action-set
+       (keys)
+       (map #(action-conflict state-id % (get action-set %)))
+       (filter (comp not nil?))))
+
+(defn- find-conflicts
+  "Find all conflicts. Throw an ex-info with the :type :conflict and a list of conflicts.
+  Otherwise return the table"
+  [table]
+  (let [actions (:actions table)
+        conflicts (->> actions
+                       (keys)
+                       (mapcat #(action-set-conflict % (get actions %))))]
+    (when (seq conflicts)
+      (throw (ex-info "Conflicts detected" {:type :conflict
+                                            :conflicts conflicts})))
+    table))
+
 (defn- action-set-from-state
   [states state]
   (let [shifts (state-get-shifts state)
@@ -293,7 +428,7 @@
                         {} actions)]
     actions))
 
-(defn to-lr-1
+(defn to-lr-1-table
   [parser-builder start-rule-ident]
   (let [states (build-graph-states parser-builder start-rule-ident)
         accept-state (get states (identify-accepting-state states))
@@ -303,9 +438,10 @@
                   (if s
                     (recur ss (assoc actions (:id (val s)) (action-set-from-state states (val s))))
                     actions))]
-    (throw-on-schema-invalid
-     LR1ParserTable
-     {:start-state (:id start-state)
-      :accept-state (:id accept-state)
-      :lexer (:lexer parser-builder)
-      :actions actions})))
+    (->> {:start-state (:id start-state)
+          :accept-state (:id accept-state)
+          :lexer (:lexer parser-builder)
+          :actions actions}
+         (throw-on-schema-invalid
+          LR1ParserTable)
+         (find-conflicts))))

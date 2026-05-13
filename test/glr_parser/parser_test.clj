@@ -14,10 +14,10 @@
                     (lex/add-const :e "e")
                     (lex/build))
           parser (-> (par/new-parser-builder lexer)
-                     (par/add-rule :S [[:S :a :A :b :S :c :S]
+                     (par/add-rule :S [[:a :A :b :S :c :S]
                                        [:a :A :b :S]
                                        [:d]])
                      (par/add-rule :A [:e]))
           states (par/build-graph-states parser :S)
-          lr1-parser-table (par/to-lr-1 parser :S)]
-      (par/to-graphviz states))))
+          _ (par/to-graphviz states)
+          lr1-parser-table (par/to-lr-1-table parser :S)])))

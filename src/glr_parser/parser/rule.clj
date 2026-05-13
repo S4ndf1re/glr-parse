@@ -5,8 +5,7 @@
   [:cat
    [:*
     :keyword]
-   [:or
-    :keyword
+   [:?
     [:fn fn?]]])
 
 (def StrictRuleAlternative
