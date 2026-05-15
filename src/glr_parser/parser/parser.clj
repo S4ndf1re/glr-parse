@@ -6,7 +6,8 @@
    [glr-parser.parser.dotted :as dot]
    [glr-parser.parser.rule :as rl]
    [glr-parser.util :refer [Ident throw-on-schema-invalid]]
-   [clojure.string :as s]))
+   [clojure.string :as s]
+   [taoensso.nippy :as nippy]))
 
 (def reserved-keywords #{:$shell})
 
@@ -30,7 +31,9 @@
 
 (defn- is-valid-input-rule-ident?
   [kw]
-  (not (is-repeat-or-optional? kw)))
+  (and
+   (not (is-repeat-or-optional? kw))
+   (seq (re-matches #"[a-zA-Z_][\w-]*" (name kw)))))
 
 (def InputRuleIdent
   [:and
@@ -524,6 +527,14 @@
     (= (:type action) :reduce) (handle-reduce table lexer stack token action)
     (= (:type action) :shift) (handle-shift table lexer stack token action)
     :else (throw (ex-info "cannot handle non shift or reduce action" {:action action}))))
+
+(defn serialize-table
+  [table]
+  (nippy/freeze table))
+
+(defn deserialize-table
+  [bytes]
+  (nippy/thaw bytes))
 
 (defn run-lr-1
   "Execute the table using the defined lexer"
