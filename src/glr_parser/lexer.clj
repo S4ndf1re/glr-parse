@@ -39,19 +39,19 @@
    [:skips [:set #'Ident]]
    [:current-idx :int]
    [:input-string [:vector char?]]
-   [:filename :string]])
+   [:filename [:maybe :string]]])
 
 (defn new-empty
   "Build a new lexer, that accepts both the consts and rules. Skip rules that are contained in skips by name"
-  [input-string filename]
+  []
   {:consts {}
    :rules {}
    :callbacks {}
    :rules-graph nil
    :skips #{}
    :current-idx 0
-   :input-string (vec input-string)
-   :filename filename})
+   :input-string []
+   :filename nil})
 
 (defn ident-exists
   [lexer ident]
@@ -125,6 +125,13 @@
           (assoc :rules-graph dfa-graph)
           (#(throw-on-schema-invalid Lexer %))))))
 
+(defn start-lexing
+  [lexer input-string filename]
+  (-> lexer
+      (assoc :filename filename)
+      (assoc :input-string (vec input-string))
+      (assoc :current-idx 0)))
+
 (defn- current-input
   [lexer]
   (subvec (:input-string lexer) (:current-idx lexer)))
@@ -136,7 +143,7 @@
          [i & is] input]
     (cond
       (and t i (= t i)) (recur ts is)
-      (and (not t) i) true
+      (not t) true
       :else false)))
 
 (defn- get-longest-match
@@ -167,11 +174,12 @@
 
 (defn- new-token
   [lexer ident value start end]
-  {:ident ident
-   :value (apply str value)
-   :start start
-   :end end
-   :data (call-callback lexer ident (apply str value))})
+  (let [token-as-str (apply str value)]
+    {:ident ident
+     :start start
+     :end end
+     :raw-data token-as-str
+     :data (call-callback lexer ident token-as-str)}))
 
 (defn token-range
   "Get the start-end range in the form [start, end) for a token"
@@ -183,15 +191,20 @@
   [tok]
   (:ident tok))
 
-(defn token-value
+(defn token-data
   "Get the value as a string. Note that the string conversion from vector of chars to string is performed in the new-token private function"
   [tok]
-  (:value tok))
+  (:data tok))
+
+(defn token-raw-data
+  "Get the value as a string. Note that the string conversion from vector of chars to string is performed in the new-token private function"
+  [tok]
+  (:data tok))
 
 (defn- peek-with-length
   "Peek a token, also return the length the lexer would have to advance, to land behind the token. This is also the length of the matched token"
   [lexer]
-  (if (not (seq (current-input lexer)))
+  (if-not (seq (current-input lexer))
     (list 0 :eof)
     (let [current-input-vec (current-input lexer)
           matching-const (first (sort-by #(- (:length %))

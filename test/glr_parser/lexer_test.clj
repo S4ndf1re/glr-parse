@@ -4,7 +4,7 @@
             [clojure.test :refer [testing is deftest]]))
 
 (deftest lexer-test-1
-  (let [lexer (-> (lex/new-empty "abc 1234 1234.1234" "abc")
+  (let [lexer (-> (lex/new-empty)
                   (lex/add-const :abc "abc")
                   (lex/add-rule :number
                                 (rgx/->Sequence [(rgx/->OneOrMore (rgx/->Digit))
@@ -18,7 +18,8 @@
                                 (rgx/->Or [(rgx/->Constant \space)
                                            (rgx/->Constant \newline)]))
                   (lex/add-skip :whitespace)
-                  (lex/build))]
+                  (lex/build)
+                  (lex/start-lexing "abc 1234 1234.1234" "abc"))]
 
     (testing "expected tokens"
       (let [expected-token-idents [:abc :word :number :eof]]
@@ -31,7 +32,7 @@
             nil))))))
 
 (deftest lexer-test-strings-1
-  (let [lexer (-> (lex/new-empty "\"test \\n 123\" \"cdef.hello, world \\\" \" abc 123." "abc")
+  (let [lexer (-> (lex/new-empty)
                   (lex/add-const :abc "abc")
                   (lex/add-rule :number
                                 (rgx/->Sequence [(rgx/->OneOrMore (rgx/->Digit))
@@ -54,7 +55,8 @@
                                 (rgx/->Or [(rgx/->Constant \space)
                                            (rgx/->Constant \newline)]))
                   (lex/add-skip :whitespace)
-                  (lex/build))]
+                  (lex/build)
+                  (lex/start-lexing "\"test \\n 123\" \"cdef.hello, world \\\" \" abc 123." "abc"))]
 
     (testing "expected tokens"
       (let [expected-token-idents [:string :string :abc :number :eof]]

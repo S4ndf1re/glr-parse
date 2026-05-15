@@ -40,6 +40,20 @@
     (into [] rule)
     [rule]))
 
+(defn get-variant
+  "Get the variant or nil, if variant is out of bounds"
+  [rule variant]
+  (if (>= variant (count (:rules rule)))
+    nil
+    (nth (:rules rule) variant)))
+
+(defn call-callback
+  [rule variant data]
+  (let [callback (nth (:callbacks rule) variant)]
+    (if callback
+      (callback data)
+      (identity data))))
+
 (defn- get-last-if-callback
   "Get the callback on the last position, or get the identity function"
   [list]
@@ -50,7 +64,7 @@
 (defn- get-all-except-last-if-callback
   [list]
   (if (fn? (last list))
-    (drop-last list)
+    (into [] (drop-last list))
     list))
 
 (defn new-rule

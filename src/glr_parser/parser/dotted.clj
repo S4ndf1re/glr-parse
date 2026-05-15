@@ -69,7 +69,7 @@
   (let [rule-kw (:rule rule)
         [rule-kw-start rule-kw-end] (split-at (:dot rule) rule-kw)
         rule-kw (concat rule-kw-start [:.] rule-kw-end)
-        rule-str (str/join "" (map name rule-kw))
+        rule-str (str/join " " (map name rule-kw))
         ident-str (name (:ident rule))]
     (str ident-str " := " rule-str " \\| \\{ " (str/join "," (map name (:lookahead rule))) " \\}")))
 

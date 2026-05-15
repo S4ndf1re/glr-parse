@@ -81,15 +81,15 @@
   (let [stripped-kw (strip-last-char-from-kw kw)]
     (cond
       (is-zero-or-more? kw)
-      [[stripped-kw kw]
-       []]
+      [[stripped-kw kw (fn [[applied-rule list]] (conj (:data list) (:data applied-rule)))]
+       [(fn [_] '())]]
           ;;
       (is-one-or-more? kw)
-      [stripped-kw (keyword (str (name stripped-kw) "*"))]
+      [stripped-kw (keyword (str (name stripped-kw) "*")) (fn [[applied-rule list]] (conj (:data list) (:data applied-rule)))]
           ;;
       (is-optional? kw)
-      [[stripped-kw]
-       []])))
+      [[stripped-kw (fn [[applied]] (:data applied))]
+       [(fn [_] nil)]])))
 
 (defn- normalize-rule-alternative
   [parser-builder rule-alternative]
@@ -134,25 +134,29 @@
 (defn- first-set-alternative
   "Build the first set out of a single vector of keywords (i.e. a single rule).
   If no rule alternative is provided, a transducer is returned instead"
-  ([parser-builder] (fn [rf]
-                      (fn
-                        ([] (rf))
-                        ([acc] (rf acc))
-                        ([acc rule-alternative] (rf acc (first-set-alternative parser-builder rule-alternative))))))
-  ([parser-builder alternative-list]
+  ([parser-builder already-visited] (fn [rf]
+                                      (fn
+                                        ([] (rf))
+                                        ([acc] (rf acc))
+                                        ([acc rule-alternative] (rf acc (first-set-alternative parser-builder already-visited rule-alternative))))))
+  ([parser-builder already-visited alternative-list]
    (let [first-elem (first alternative-list)]
-     (if (get-rule parser-builder first-elem)
-       (first-set parser-builder first-elem)
-       #{first-elem}))))
+     (cond
+       ;; Both is rule and nto already visited
+       (and (get-rule parser-builder first-elem) (not (contains? already-visited first-elem)))
+       (first-set parser-builder already-visited first-elem)
+       ;; Else
+       (contains? already-visited first-elem) #{}
+       :else #{first-elem}))))
 
 (defn first-set
   "collect all terminals that are at first position of the rule.
   The rule is extracted from the parser-builder and is expected to be a non terminal.
   The rule-ident specifies the rule in question"
-  [parser-builder rule-ident]
+  [parser-builder already-visited rule-ident]
   (let [rule (get-rule parser-builder rule-ident)]
     (if rule
-      (transduce (first-set-alternative parser-builder) clojure.set/union #{} (rl/rule-rules rule))
+      (transduce (first-set-alternative parser-builder (conj already-visited rule-ident)) clojure.set/union #{} (rl/rule-rules rule))
       nil)))
 
 (defn- follow-set-single
@@ -167,7 +171,7 @@
   ([parser-builder dotted-rule]
    (let [dotted-rule (dot/dotted-advance dotted-rule)]
      (if-not (dot/is-at-end? dotted-rule)
-       (let [first-set (first-set-alternative parser-builder
+       (let [first-set (first-set-alternative parser-builder #{}
                                               (dot/get-rest dotted-rule))]
          (if-not (contains? first-set nil)
            first-set
@@ -355,6 +359,7 @@
   [:map
    [:start-state #'StateId]
    [:accept-state #'StateId]
+   [:rules [:map-of #'Ident #'rl/Rule]]
    [:lexer #'lex/Lexer]
    [:actions [:map-of #'StateId #'ActionSet]]])
 
@@ -414,20 +419,20 @@
                             (assoc acc k (conj (get acc k []) {:type :shift
                                                                :next-state (:id next-state)}))))
                         {} shifts)
-        ;; For each action, add all reduces
-        actions (reduce (fn [acc [k v]]
-                          (assoc acc k
-                                 (reduce (fn [acc r]
-                                           (conj acc
-                                                 {:type :reduce
-                                                  :rule (dot/get-ident r)
-                                                  :variant (dot/get-variant r)
-                                                  :lookahead (dot/get-lookahead r)}))
-                                         v reduces)))
-                        {} actions)]
+        ;; Add the reduces according to the lookahead
+        actions (reduce (fn [actions r]
+                          (reduce (fn [actions lookahead]
+                                    (assoc actions lookahead
+                                           (conj
+                                            (get actions lookahead [])
+                                            {:type :reduce
+                                             :rule (dot/get-ident r)
+                                             :variant (dot/get-variant r)
+                                             :lookahead (dot/get-lookahead r)}))) actions (:lookahead r)))
+                        actions reduces)]
     actions))
 
-(defn to-lr-1-table
+(defn build-lr-1
   [parser-builder start-rule-ident]
   (let [states (build-graph-states parser-builder start-rule-ident)
         accept-state (get states (identify-accepting-state states))
@@ -439,8 +444,108 @@
                     actions))]
     (->> {:start-state (:id start-state)
           :accept-state (:id accept-state)
+          :rules (:rules parser-builder)
           :lexer (:lexer parser-builder)
           :actions actions}
          (throw-on-schema-invalid
           LR1ParserTable)
          (find-conflicts))))
+
+(defn- action-set-get-correct-action
+  [actions token]
+  (first (get actions token)))
+
+(defn- call-callback
+  [table rule-ident variant data]
+  (-> table
+      :rules
+      (get rule-ident)
+      (rl/call-callback variant data)))
+
+(defn- new-value
+  [table rule-ident variant start end data]
+  {:ident rule-ident
+   :start start
+   :end end
+   :raw-data data
+   :data (call-callback table rule-ident variant data)})
+
+(defn- value-from-values
+  [table rule-ident variant values]
+  (let [min-start (min-key :start values)
+        max-end (max-key :end values)]
+    (new-value table rule-ident variant min-start max-end values)))
+
+(defn- handle-shift
+  [_table lexer stack token shift-action]
+  (when-not (= (:type shift-action) :shift)
+    (throw (ex-info "CRITICAL: Error occured during parser generation. Action should be shift by a non terminal!" {:action shift-action})))
+  (list
+   (first (lex/advance lexer))
+   (conj stack {:state (:next-state shift-action)
+                :value token})))
+
+(defn- handle-reduce
+  [table lexer stack _token reduce-action]
+  (when-not (= (:type reduce-action) :reduce) (throw (ex-info "CRITICAL: cannot handle non reduce action in reduce action handler" {:action reduce-action})))
+  (let [rule-ident (:rule reduce-action)
+        variant (:variant reduce-action)
+        rule (get-in table [:rules rule-ident])
+        rule-variant (rl/get-variant rule variant)
+        rule-length (count rule-variant)]
+    (when-not rule-variant
+      (throw (ex-info "CIRITICAL: Error occured during parser generation. rule variant does not exist"
+                      {:ident rule-ident
+                       :variant rule-variant})))
+    ;; Happy path, first pop the stack, collecting all values
+    (let [[stack collected-values]
+          (loop [stack stack
+                 counter rule-length
+                 collected-values '()]
+            (if (> counter 0)
+              (recur (pop stack) (dec counter) (conj collected-values (:value (peek stack))))
+              (list stack collected-values)))
+          ;; Then create the new value from the collected values and figure out the next state, by shifting using the rule ident
+          value (value-from-values table
+                                   rule-ident
+                                   variant
+                                   collected-values)
+          reduced-state-id (:state (peek stack))
+          shift-for-ident (action-set-get-correct-action (get-in table [:actions reduced-state-id]) rule-ident)]
+      (if-not (= (:type shift-for-ident) :shift)
+        (throw (ex-info "CRICITCAL: Action should be shift, but is not" {:action shift-for-ident}))
+        (list lexer (conj stack {:state (:next-state shift-for-ident)
+                                 :value value}))))))
+
+(defn- handle-action
+  "Handle a single action, returning the processed lexer, and stack"
+  [table lexer stack token action]
+  (cond
+    (= (:type action) :reduce) (handle-reduce table lexer stack token action)
+    (= (:type action) :shift) (handle-shift table lexer stack token action)
+    :else (throw (ex-info "cannot handle non shift or reduce action" {:action action}))))
+
+(defn run-lr-1
+  "Execute the table using the defined lexer"
+  [table input-string filename]
+  (throw-on-schema-invalid LR1ParserTable table)
+  (loop [stack (list {:state (:start-state table)
+                      :value nil})
+         lexer (lex/start-lexing (:lexer table) input-string filename)]
+    (let [{:keys [state value]} (peek stack)
+          peeked-token (lex/peek lexer)
+          state-actions (get-in table [:actions state])
+          action (action-set-get-correct-action state-actions (lex/token-ident peeked-token))]
+      (if (and (= (:accept-state table) state)
+               (= (lex/token-ident peeked-token) :eof))
+        ;; Accept state
+        value
+        ;; Else case
+        (if action
+          (let [[new-lexer new-stack] (handle-action table lexer stack peeked-token action)]
+            (recur new-stack new-lexer))
+          (throw (ex-info "Could not apply next token in action table" {:state state
+                                                                        :value value
+                                                                        :token peeked-token
+                                                                        :state-actions state-actions
+                                                                        :table table})))))))
