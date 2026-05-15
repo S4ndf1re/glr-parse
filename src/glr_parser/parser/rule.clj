@@ -59,7 +59,7 @@
   [list]
   (if (fn? (last list))
     (last list)
-    identity))
+    (fn [l] (map :data l))))
 
 (defn- get-all-except-last-if-callback
   [list]
