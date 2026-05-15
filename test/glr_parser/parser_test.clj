@@ -93,6 +93,11 @@
                     (lex/add-const :l-paren "(")
                     (lex/add-const :r-paren ")")
                     (lex/add-const :semicolon ";")
+                    (lex/add-rule :whitespace (rgx/->Or [(rgx/->Constant \space)
+                                                         (rgx/->Constant \newline)
+                                                         (rgx/->Constant \t)
+                                                         (rgx/->Constant \r)]))
+                    (lex/add-skip :whitespace)
                     (lex/build))
           parser (-> (par/new-parser-builder lexer)
                      (par/add-rule :S [:Statement+ (fn [[stmts]] (:data stmts))])
@@ -107,5 +112,6 @@
                                             [:l-paren :Expr :r-paren (fn [[_ expr _]] (:data expr))]]))
           parser-table (par/build-lr-1 parser :S)
           ;; _ (par/to-graphviz states)
-          ast (par/run-lr-1 parser-table "1+2*(7-2);(5*(2+3)-20);" "test")]
+          ast (par/run-lr-1 parser-table "1+2*(7-2);
+                                          (5*(2+3)-20);" "test")]
       (is (= (:data ast) '(11, 5))))))
