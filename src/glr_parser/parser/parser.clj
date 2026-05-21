@@ -1,13 +1,16 @@
 (ns glr-parser.parser.parser
   (:require
    [clojure.set :as set]
+   [clojure.string :as s]
    [com.phronemophobic.clj-graphviz :as viz]
    [glr-parser.lexer :as lex]
    [glr-parser.parser.dotted :as dot]
+   [glr-parser.parser.precedence :as precedence :refer [Associativity
+                                                        PrecedenceOrNil]]
    [glr-parser.parser.rule :as rl]
    [glr-parser.util :refer [Ident throw-on-schema-invalid]]
-   [clojure.string :as s]
-   [taoensso.nippy :as nippy]))
+   [taoensso.nippy :as nippy]
+   [glr-parser.common.token :as tok]))
 
 (def reserved-keywords #{:$shell})
 
@@ -42,7 +45,7 @@
 
 (def ParserBuilder
   [:map
-   [:lexer #'lex/Lexer]
+   [:lexer #'lex/LexerType]
    [:rules [:map-of #'Ident #'rl/Rule]]])
 
 (defn new-parser-builder
@@ -275,7 +278,7 @@
             (recur (inc next-id) to-visit (assoc states v state)))
           (recur next-id vs states))
 
-        states))))
+        [parser-builder states]))))
 
 (defn- is-first-state?
   [state-key]
@@ -342,11 +345,15 @@
    [:type [:enum :reduce]]
    [:rule :keyword]
    [:variant :int]
+   [:precedence #'PrecedenceOrNil]
+   [:associativity #'Associativity]
    [:lookahead [:set :keyword]]])
 
 (def Shift
   [:map
    [:type [:enum :shift]]
+   [:precedence #'PrecedenceOrNil]
+   [:associativity #'Associativity]
    [:next-state #'StateId]])
 
 (def Action
@@ -363,23 +370,42 @@
    [:start-state #'StateId]
    [:accept-state #'StateId]
    [:rules [:map-of #'Ident #'rl/Rule]]
-   [:lexer #'lex/Lexer]
+   [:lexer #'lex/LexerType]
    [:actions [:map-of #'StateId #'ActionSet]]])
+
+(defn- reduce-action-to-precedence-tuple
+  [reduce-action]
+  [(:precedence reduce-action) (:associativity reduce-action)])
 
 (defn- new-conflict-or-nil
   "Build a new conflict for a state, a shift, multiple reduces and an intersecting lookahead set
   that is valid for both the shift and all reduces."
   [state-id shift reduces lookahead-intersection]
-  (cond (and (not shift) (>= (count reduces) 2)) {:type :reduce-reduce
-                                                  :state state-id
-                                                  :alternatives reduces
-                                                  :next-token lookahead-intersection}
-        (and shift (>= (count reduces) 1)) {:type :shift-reduce
-                                            :state state-id
-                                            :shift shift
-                                            :reduces reduces
-                                            :next-token lookahead-intersection}
-        :else nil))
+  (let [reduces-sorted-by-precedence (reverse
+                                      (sort-by
+                                       (comp precedence/to-tuple reduce-action-to-precedence-tuple)
+                                       reduces))
+        highest-reduce-precedence (reduce-action-to-precedence-tuple (first reduces-sorted-by-precedence))
+        filtered-reduces (filter (comp #(= % 0)
+                                       #(precedence/cmp % highest-reduce-precedence)
+                                       reduce-action-to-precedence-tuple) reduces)
+        shift-precedence [(:precedence shift) (:associativity shift)]]
+    (cond
+      (and (not shift)
+           (>= (count filtered-reduces) 2))
+      {:type :reduce-reduce
+       :state state-id
+       :alternatives reduces
+       :next-token lookahead-intersection}
+      (and shift
+           (>= (count reduces) 1)
+           (= (precedence/cmp shift-precedence highest-reduce-precedence) 0))
+      {:type :shift-reduce
+       :state state-id
+       :shift shift
+       :reduces reduces
+       :next-token lookahead-intersection}
+      :else nil)))
 
 (defn- action-conflict
   [state-id token action]
@@ -413,37 +439,45 @@
     table))
 
 (defn- action-set-from-state
-  [states state]
+  [parser-builder states state]
   (let [shifts (state-get-shifts state)
         reduces (state-get-reduces state)
         ;; For each shift, add to corresponding action
         actions (reduce (fn [acc [k v]]
                           (let [next-state (get states v)]
+                            ;; TODO(jan): extract rule precedences for the shift target state, to determine the shift precedence
                             (assoc acc k (conj (get acc k []) {:type :shift
+                                                               :precedence nil
+                                                               :associativity :none
                                                                :next-state (:id next-state)}))))
                         {} shifts)
         ;; Add the reduces according to the lookahead
         actions (reduce (fn [actions r]
                           (reduce (fn [actions lookahead]
-                                    (assoc actions lookahead
-                                           (conj
-                                            (get actions lookahead [])
-                                            {:type :reduce
-                                             :rule (dot/get-ident r)
-                                             :variant (dot/get-variant r)
-                                             :lookahead (dot/get-lookahead r)}))) actions (:lookahead r)))
+                                    (let [rule (get-rule parser-builder (dot/get-ident r))
+                                          [precedence associativity] (rl/get-variant-precedence-and-associativiy rule (dot/get-variant r))]
+                                      (assoc actions lookahead
+                                             (conj
+                                              (get actions lookahead [])
+                                              {:type :reduce
+                                               :rule (dot/get-ident r)
+                                               :variant (dot/get-variant r)
+                                               :precedence precedence
+                                               :associativity associativity
+                                               :lookahead (dot/get-lookahead r)}))))
+                                  actions (:lookahead r)))
                         actions reduces)]
     actions))
 
 (defn build-lr-1
   [parser-builder start-rule-ident]
-  (let [states (build-graph-states parser-builder start-rule-ident)
+  (let [[parser-builder states] (build-graph-states parser-builder start-rule-ident)
         accept-state (get states (identify-accepting-state states))
         start-state (get states (identify-first-state states))
         actions (loop [[s & ss] states
                        actions {}]
                   (if s
-                    (recur ss (assoc actions (:id (val s)) (action-set-from-state states (val s))))
+                    (recur ss (assoc actions (:id (val s)) (action-set-from-state parser-builder states (val s))))
                     actions))]
     (->> {:start-state (:id start-state)
           :accept-state (:id accept-state)
@@ -467,16 +501,12 @@
 
 (defn- new-value
   [table rule-ident variant start end data]
-  {:ident rule-ident
-   :start start
-   :end end
-   :raw-data data
-   :data (call-callback table rule-ident variant data)})
+  (tok/new-token rule-ident data (call-callback table rule-ident variant data) start end))
 
 (defn- value-from-values
   [table rule-ident variant values]
-  (let [min-start (min-key :start values)
-        max-end (max-key :end values)]
+  (let [min-start (min-key tok/start values)
+        max-end (max-key tok/end values)]
     (new-value table rule-ident variant min-start max-end values)))
 
 (defn- handle-shift
@@ -546,9 +576,9 @@
     (let [{:keys [state value]} (peek stack)
           peeked-token (lex/peek lexer)
           state-actions (get-in table [:actions state])
-          action (action-set-get-correct-action state-actions (lex/token-ident peeked-token))]
+          action (action-set-get-correct-action state-actions (tok/ident peeked-token))]
       (if (and (= (:accept-state table) state)
-               (= (lex/token-ident peeked-token) :eof))
+               (= (tok/ident peeked-token) :eof))
         ;; Accept state
         value
         ;; Else case

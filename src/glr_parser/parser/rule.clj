@@ -1,12 +1,13 @@
 (ns glr-parser.parser.rule
-  (:require [glr-parser.util :refer [throw-on-schema-invalid Ident]]))
+  (:require [glr-parser.util :refer [throw-on-schema-invalid Ident]]
+            [malli.core :as m]
+            [glr-parser.parser.precedence :refer [Precedence PrecedenceOrNil Associativity PrecedenceAssociativityTuple]]))
 
 (def RuleAlternative
   [:cat
-   [:*
-    :keyword]
-   [:?
-    [:fn fn?]]])
+   [:? #'PrecedenceAssociativityTuple]
+   [:* :keyword]
+   [:? [:fn fn?]]])
 
 (def StrictRuleAlternative
   [:vector :keyword])
@@ -26,7 +27,9 @@
   [:map
    [:ident #'Ident]
    [:rules #'StrictRuleList]
-   [:callbacks #'StrictCallbacks]])
+   [:callbacks #'StrictCallbacks]
+   [:precedences [:vector #'PrecedenceOrNil]]
+   [:associativities [:vector #'Associativity]]])
 
 (defn- is-nested?
   "Check if the list is nested"
@@ -67,16 +70,31 @@
     (into [] (drop-last list))
     list))
 
+(defn- split-precedence-associativity-rules
+  [alternative]
+  (cond
+    (and (m/validate Precedence (first alternative))
+         (m/validate Associativity (second alternative)))
+    (list (first alternative) (second alternative) (subvec alternative 2))
+    (and (m/validate Precedence (first alternative))
+         (not (m/validate Associativity (second alternative))))
+    (list (first alternative) :none (subvec alternative 1))
+    :else (list nil :none alternative)))
+
 (defn new-rule
   [ident rule]
   (throw-on-schema-invalid RuleList rule)
   (throw-on-schema-invalid Ident ident)
   (let [alternatives (rule-alternatives rule)
         callbacks (mapv get-last-if-callback alternatives)
-        rules (mapv get-all-except-last-if-callback alternatives)]
+        rules (mapv get-all-except-last-if-callback alternatives)
+        splitted-rules (mapv split-precedence-associativity-rules rules)
+        [precedences associativities rules] (apply map vector splitted-rules)]
     (throw-on-schema-invalid Rule {:ident ident
                                    :rules rules
-                                   :callbacks callbacks})))
+                                   :callbacks callbacks
+                                   :precedences precedences
+                                   :associativities associativities})))
 
 (defn rule-ident
   [rule]
@@ -85,3 +103,15 @@
 (defn rule-rules
   [rule]
   (:rules rule))
+
+(defn get-last-terminal-or-nil
+  [rule variant is-terminal?]
+  (-> rule
+      (get-in [:rules variant])
+      (#(filter is-terminal? %))
+      (last)))
+
+(defn get-variant-precedence-and-associativiy
+  [rule variant]
+  [(get-in rule [:precedences variant])
+   (get-in rule [:associativities variant])])

@@ -1,11 +1,12 @@
 (ns glr-parser.lexer
   (:require
-   [glr-parser.regex :as rgx]
-   [glr-parser.graph.nfa :as nfa]
    [clojure.string :as s]
-   [glr-parser.graph.dfa :as dfa]
+   [glr-parser.common.token :refer [new-token]]
    [glr-parser.graph.automaton :as autom]
-   [glr-parser.util :refer [throw-on-schema-invalid Ident]]))
+   [glr-parser.graph.dfa :as dfa]
+   [glr-parser.graph.nfa :as nfa]
+   [glr-parser.regex :as rgx]
+   [glr-parser.util :refer [Ident throw-on-schema-invalid]]))
 
 (def reserved-keywords #{:eof})
 
@@ -30,7 +31,7 @@
 (def Callback
   [:fn (fn [x] (fn? x))])
 
-(def Lexer
+(def LexerType
   [:map
    [:consts [:map-of #'Ident #'InnerConst]]
    [:rules [:map-of #'Ident #'InnerRule]]
@@ -41,21 +42,12 @@
    [:input-string [:vector char?]]
    [:filename [:maybe :string]]])
 
-(defn new-empty
-  "Build a new lexer, that accepts both the consts and rules. Skip rules that are contained in skips by name"
-  []
-  {:consts {}
-   :rules {}
-   :callbacks {}
-   :rules-graph nil
-   :skips #{}
-   :current-idx 0
-   :input-string []
-   :filename nil})
-
-(defn ident-exists
-  [lexer ident]
-  (or (get-in lexer [:consts ident]) (get-in lexer [:rules ident]) (contains? reserved-keywords ident)))
+(defprotocol ILexer
+  (start-lexing [this input-string filename] "Instruct the lexer to start from the beginning for input string and filename")
+  (advance [this] "Advance the lexer by one. Use advance-n to call this multiple times and get a list of tokens")
+  #_{:clj-kondo/ignore [:redefined-var]}
+  (peek [this] "Peek the next lexer token. Use peek-n to call this multiple times")
+  (ident-exists [this ident] "return true, if the ident is alread registered within the lexer, to avoid duplicate tokens in the parser"))
 
 (defn add-const
   "Add a new constant, ensuring priority over rules for equal length matches"
@@ -72,7 +64,7 @@
                                     :constant (clojure.string/trim constant)
                                     :length (count (clojure.string/trim constant))})
          (assoc-in [:callbacks ident] callback)
-         (#(throw-on-schema-invalid Lexer %))))))
+         (#(throw-on-schema-invalid LexerType %))))))
 
 (defn add-rule
   "Add a new rule, consisting of a regex. When both a constant and regex rule match with the same lenght, the constant has priority. Otherwise, the longest match is chosen"
@@ -86,7 +78,7 @@
      (-> lexer
          (assoc-in [:rules ident] {:ident ident :rule rule :precedence precedence})
          (assoc-in [:callbacks ident] callback)
-         (#(throw-on-schema-invalid Lexer %))))))
+         (#(throw-on-schema-invalid LexerType %))))))
 
 (defn add-skip
   "Add a rule or constant to the skip list"
@@ -94,9 +86,9 @@
   (throw-on-schema-invalid Ident ident)
   (-> lexer
       (assoc :skips (conj (:skips lexer) ident))
-      (#(throw-on-schema-invalid Lexer %))))
+      (#(throw-on-schema-invalid LexerType %))))
 
-(defn call-callback
+(defn- call-callback
   [lexer ident raw-content]
   (if (get-in lexer [:callbacks ident])
     ((get-in lexer [:callbacks ident] identity) raw-content)
@@ -123,14 +115,7 @@
                                                    :duplicates duplicates}))
       (-> lexer
           (assoc :rules-graph dfa-graph)
-          (#(throw-on-schema-invalid Lexer %))))))
-
-(defn start-lexing
-  [lexer input-string filename]
-  (-> lexer
-      (assoc :filename filename)
-      (assoc :input-string (vec input-string))
-      (assoc :current-idx 0)))
+          (#(throw-on-schema-invalid LexerType %))))))
 
 (defn- current-input
   [lexer]
@@ -172,35 +157,6 @@
 
     :else (throw (ex-info "CRITICAL: all cases checked already" {}))))
 
-(defn- new-token
-  [lexer ident value start end]
-  (let [token-as-str (apply str value)]
-    {:ident ident
-     :start start
-     :end end
-     :raw-data token-as-str
-     :data (call-callback lexer ident token-as-str)}))
-
-(defn token-range
-  "Get the start-end range in the form [start, end) for a token"
-  [tok]
-  (list (:start tok) (:end tok)))
-
-(defn token-ident
-  "Get the token identifier as specified by the rule"
-  [tok]
-  (:ident tok))
-
-(defn token-data
-  "Get the value as a string. Note that the string conversion from vector of chars to string is performed in the new-token private function"
-  [tok]
-  (:data tok))
-
-(defn token-raw-data
-  "Get the value as a string. Note that the string conversion from vector of chars to string is performed in the new-token private function"
-  [tok]
-  (:data tok))
-
 (defn- peek-with-length
   "Peek a token, also return the length the lexer would have to advance, to land behind the token. This is also the length of the matched token"
   [lexer]
@@ -218,30 +174,59 @@
   [lexer next-idx]
   (assoc lexer :current-idx next-idx))
 
-(defn advance
-  "Advance the lexer by one token, returning both the lexer and the token. If the additional parameter n is supplied, advance n times.
-  If the advanced token is part of the skips set, skip the token and return the logical next token by recursively calling into advance"
-  ([lexer]
-   (let [[match-length token] (peek-with-length lexer)
-         start (:current-idx lexer)
-         end (+ start match-length)]
-     (if ((:skips lexer) token)
-       (advance (advance-lexer-to-idx lexer end))
-       (list (advance-lexer-to-idx lexer end)
-             (new-token lexer token (subvec (:input-string lexer) start end) start end)))))
-  ([lexer n]
-   (loop [n n
-          tokens []
-          lexer lexer]
-     (if (> n 0)
-       (let [[lex, tok] (advance lexer)]
-         (recur (dec n) (conj tokens tok) lex))
-       (list lexer
-             (into '() tokens))))))
+(defn advance-n
+  [lexer n]
+  (loop [n n
+         tokens []
+         lexer lexer]
+    (if (> n 0)
+      (let [[lex, tok] (advance lexer)]
+        (recur (dec n) (conj tokens tok) lex))
+      (list lexer
+            (into '() tokens)))))
 
-#_{:clj-kondo/ignore [:redefined-var]}
-(defn peek
-  "Peek the next token, by executing advance, but not returning the changed lexer.
-  An additional parameter n can be supplied, so that n tokens are peeked and returned list"
-  ([lexer] (second (advance lexer)))
-  ([lexer n] (second (advance lexer n))))
+(defn peek-n
+  [lexer n]
+  (second (advance-n lexer n)))
+
+(defrecord Lexer [consts rules callbacks rules-graph skips current-idx input-string filename]
+  ILexer
+
+  (advance [this]
+    (let [[match-length token] (peek-with-length this)
+          start current-idx
+          end (+ start match-length)
+          token-as-str (apply str (subvec input-string start end))
+          transformed-token (call-callback this token token-as-str)]
+      (if (get skips token)
+        (advance (advance-lexer-to-idx this end))
+        (list (advance-lexer-to-idx this end)
+              (new-token token
+                         (apply str (subvec input-string start end))
+                         transformed-token
+                         start end)))))
+
+  (peek [this]
+    (second (advance this)))
+
+  (start-lexing [this input-string filename]
+    (-> this
+        (assoc :filename filename)
+        (assoc :input-string (vec input-string))
+        (assoc :current-idx 0)))
+
+  (ident-exists [_this ident]
+    (or (get consts ident) (get rules ident) (contains? reserved-keywords ident))))
+
+(defn new-empty
+  "Build a new lexer, that accepts both the consts and rules. Skip rules that are contained in skips by name"
+  []
+  (->Lexer
+   {}
+   {}
+   {}
+   nil
+   #{}
+   0
+   []
+   nil))

@@ -1,6 +1,7 @@
 (ns glr-parser.lexer-test
   (:require [glr-parser.lexer :as lex]
             [glr-parser.regex :as rgx]
+            [glr-parser.common.token :as tok]
             [clojure.test :refer [testing is deftest]]))
 
 (deftest lexer-test-1
@@ -27,7 +28,7 @@
                [ex & exs] expected-token-idents]
           (if ex
             (let [[lexer token] (lex/advance lexer)]
-              (is (= (lex/token-ident token) ex))
+              (is (= (tok/ident token) ex))
               (recur lexer exs))
             nil))))))
 
@@ -64,6 +65,6 @@
                [ex & exs] expected-token-idents]
           (if ex
             (let [[lexer token] (lex/advance lexer)]
-              (is (= (lex/token-ident token) ex))
+              (is (= (tok/ident token) ex))
               (recur lexer exs))
             nil))))))
