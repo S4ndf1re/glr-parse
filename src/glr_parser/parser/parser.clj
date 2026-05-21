@@ -1,16 +1,17 @@
 (ns glr-parser.parser.parser
   (:require
+   [clojure.pprint :as pprint]
    [clojure.set :as set]
    [clojure.string :as s]
    [com.phronemophobic.clj-graphviz :as viz]
+   [glr-parser.common.token :as tok]
    [glr-parser.lexer :as lex]
    [glr-parser.parser.dotted :as dot]
    [glr-parser.parser.precedence :as precedence :refer [Associativity
                                                         PrecedenceOrNil]]
    [glr-parser.parser.rule :as rl]
    [glr-parser.util :refer [Ident throw-on-schema-invalid]]
-   [taoensso.nippy :as nippy]
-   [glr-parser.common.token :as tok]))
+   [taoensso.nippy :as nippy]))
 
 (def reserved-keywords #{:$shell})
 
@@ -379,27 +380,27 @@
 
 (defn- new-conflict-or-nil
   "Build a new conflict for a state, a shift, multiple reduces and an intersecting lookahead set
-  that is valid for both the shift and all reduces."
+  that is valid for both the shift and all reduces. The precedence that determines reduces"
   [state-id shift reduces lookahead-intersection]
-  (let [reduces-sorted-by-precedence (reverse
-                                      (sort-by
-                                       (comp precedence/to-tuple reduce-action-to-precedence-tuple)
-                                       reduces))
+  (let [reduces-sorted-by-precedence (sort-by
+                                      (comp first reduce-action-to-precedence-tuple)
+                                      reduces)
         highest-reduce-precedence (reduce-action-to-precedence-tuple (first reduces-sorted-by-precedence))
         filtered-reduces (filter (comp #(= % 0)
                                        #(precedence/cmp % highest-reduce-precedence)
                                        reduce-action-to-precedence-tuple) reduces)
-        shift-precedence [(:precedence shift) (:associativity shift)]]
+        shift-precedence (:precedence shift)]
     (cond
-      (and (not shift)
-           (>= (count filtered-reduces) 2))
+      (>= (count filtered-reduces) 2)
       {:type :reduce-reduce
        :state state-id
        :alternatives reduces
        :next-token lookahead-intersection}
+      ;; In this case, neither the shift nor the reduce will have the same precedence, hence, no precedence can be used to find a useable rule
       (and shift
            (>= (count reduces) 1)
-           (= (precedence/cmp shift-precedence highest-reduce-precedence) 0))
+           (not highest-reduce-precedence)
+           (not shift-precedence))
       {:type :shift-reduce
        :state state-id
        :shift shift
@@ -444,11 +445,20 @@
         reduces (state-get-reduces state)
         ;; For each shift, add to corresponding action
         actions (reduce (fn [acc [k v]]
-                          (let [next-state (get states v)]
-                            ;; TODO(jan): extract rule precedences for the shift target state, to determine the shift precedence
+                          (let [next-state (get states v)
+                                state-head (:head next-state)
+                                head-precedences (map #(rl/get-variant-precedence-and-associativiy
+                                                        (get-rule parser-builder (dot/get-ident %))
+                                                        (dot/get-variant %))
+                                                      state-head)
+                                sorted-by-precedence (sort-by first head-precedences)
+                                [highest-precedence highest-associativity] (first sorted-by-precedence)
+                                same-precedences-different-associativity (filter #(and (= (first %) highest-precedence) (not (= (second %) highest-associativity))) (rest sorted-by-precedence))]
+                            (when (> (count same-precedences-different-associativity) 0)
+                              (throw (ex-info "Error in precedence, as two rules in state share different associativity with highest precedence" {:precedence highest-precedence :associativity highest-associativity :conflicts same-precedences-different-associativity})))
                             (assoc acc k (conj (get acc k []) {:type :shift
-                                                               :precedence nil
-                                                               :associativity :none
+                                                               :precedence highest-precedence
+                                                               :associativity highest-associativity
                                                                :next-state (:id next-state)}))))
                         {} shifts)
         ;; Add the reduces according to the lookahead
@@ -490,7 +500,22 @@
 
 (defn- action-set-get-correct-action
   [actions token]
-  (first (get actions token)))
+  (let [sorted-actions (sort-by :precedence (get actions token))
+        highest-ranked-action (first sorted-actions)
+        highest-precedence (:precedence highest-ranked-action)
+        filtered-actions (filter #(= (:precedence %) highest-precedence) sorted-actions)]
+    (cond
+      (= (count filtered-actions) 2)
+      (let [reduce (first (filter #(= (:type %) :reduce) filtered-actions))
+            shift (first (filter #(= (:type %) :shift) filtered-actions))]
+        (when (or (not reduce) (not shift))
+          (throw (ex-info "CRICITAL: Ambiguity not correctly checked during pre-build check" {:ambiguities filtered-actions})))
+        (cond
+          (= (:associativity reduce) :left) reduce
+          (= (:associativity reduce) :right) shift
+          :else (throw (ex-info "cannot parse as associativity of type none is invalid during conflicts" {}))))
+      (= (count filtered-actions) 1) (first filtered-actions)
+      :else (throw (ex-info "CRITICAL: ambiguity not caught in pre-build check" {:ambiguities filtered-actions})))))
 
 (defn- call-callback
   [table rule-ident variant data]
