@@ -110,6 +110,7 @@
                                           [:Factor (fn [[first]] (:data first))]])
                      (par/add-rule :Factor [[:number (fn [[number]] (:data number))]
                                             [:l-paren :Expr :r-paren (fn [[_ expr _]] (:data expr))]]))
+          ;; [_ states] (par/build-graph-states parser :S)
           parser-table (par/build-lr-1 parser :S)
           ;; _ (par/to-graphviz states)
           ast (par/run-lr-1 parser-table "1+2*(7-2);
