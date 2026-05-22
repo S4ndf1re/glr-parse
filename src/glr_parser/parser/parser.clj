@@ -399,8 +399,9 @@
       ;; In this case, neither the shift nor the reduce will have the same precedence, hence, no precedence can be used to find a useable rule
       (and shift
            (>= (count reduces) 1)
-           (not highest-reduce-precedence)
-           (not shift-precedence))
+           (or
+            (not highest-reduce-precedence)
+            (not shift-precedence)))
       {:type :shift-reduce
        :state state-id
        :shift shift
