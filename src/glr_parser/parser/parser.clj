@@ -397,6 +397,10 @@
        :alternatives reduces
        :next-token lookahead-intersection}
       ;; In this case, neither the shift nor the reduce will have the same precedence, hence, no precedence can be used to find a useable rule
+      ;;
+      ;; FIXME(jan): This might be a problem later. Currently, it is not really that clear,
+      ;;             if this nil check in the or branch is actually relevant.
+      ;;             How would shift and reduce with nil priority related to non nil priorities
       (and shift
            (>= (count reduces) 1)
            (or
