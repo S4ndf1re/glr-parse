@@ -166,6 +166,9 @@ Applying the precedence and `:left` associativity to the parser from the previou
 
 as can be seen, this is a way simpler, shorter and more concise setup, that parses exactly the same rules, while also creating a very small parser table. Note that for the precedence, just as for the lexer, lower numbers mean higher precedence.
 
+
+One important note is, that precedence is not inner rule specific, meaning that if precedence is defined in another rule a conflict might be accidentally resolved, though a generator error was expected by the developer. For example, lets let `:Expr 0` (Expression alternative 0) have precedence 0, while `:Term 0` might have a precedence of 1. In this case, even though it was not planned by the developer to resolve conflicts regarding `:Term` and `:Expr`, `:Expr` will always be preferred by the parser.
+
 ## Options
 
 FIXME: listing of options this app accepts.
