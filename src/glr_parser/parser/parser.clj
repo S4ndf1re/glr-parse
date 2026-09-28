@@ -520,7 +520,7 @@
           (= (:associativity reduce) :right) shift
           :else (throw (ex-info "cannot parse as associativity of type none is invalid during conflicts" {}))))
       (= (count filtered-actions) 1) (first filtered-actions)
-      :else (throw (ex-info "CRITICAL: ambiguity not caught in pre-build check" {:ambiguities filtered-actions})))))
+      :else (throw (ex-info "CRITICAL: cannot parse next token: no rule found" {:token token})))))
 
 (defn- call-callback
   [table rule-ident variant data]
@@ -535,8 +535,8 @@
 
 (defn- value-from-values
   [table rule-ident variant values]
-  (let [min-start (min-key tok/start values)
-        max-end (max-key tok/end values)]
+  (let [min-start (tok/start (min-key tok/start values))
+        max-end (tok/end (max-key tok/end values))]
     (new-value table rule-ident variant min-start max-end values)))
 
 (defn- handle-shift
