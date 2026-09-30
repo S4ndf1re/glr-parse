@@ -15,3 +15,10 @@
                                       {:type :invalid-schema
                                        :error (m/explain schema value)}))
     :else value))
+
+(defn fn-arities [f]
+  (->> (.getDeclaredMethods (class f))
+       (filter (fn [^java.lang.reflect.Method m] (= "invoke" (.getName m))))
+       (map (fn [^java.lang.reflect.Method m] (alength (.getParameterTypes m))))
+       distinct
+       sort))

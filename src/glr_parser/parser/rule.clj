@@ -1,5 +1,5 @@
 (ns glr-parser.parser.rule
-  (:require [glr-parser.util :refer [throw-on-schema-invalid Ident]]
+  (:require [glr-parser.util :refer [throw-on-schema-invalid Ident fn-arities]]
             [malli.core :as m]
             [glr-parser.parser.precedence :refer [Precedence PrecedenceOrNil Associativity PrecedenceAssociativityTuple]]))
 
@@ -51,10 +51,12 @@
     (nth (:rules rule) variant)))
 
 (defn call-callback
-  [rule variant data]
+  [rule variant location data]
   (let [callback (nth (:callbacks rule) variant)]
     (if callback
-      (callback data)
+      (if (some #{2} (fn-arities callback))
+        (callback location data)
+        (callback data))
       (identity data))))
 
 (defn- get-last-if-callback

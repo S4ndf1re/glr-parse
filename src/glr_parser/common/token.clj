@@ -1,14 +1,20 @@
 (ns glr-parser.common.token)
 
 (defn new-token
-  ([ident value start end]
-   (new-token ident value value start end))
-  ([ident value transformed start end]
+  ([ident value filename start end]
+   (new-token ident value value filename start end))
+  ([ident value transformed filename start end]
    {:ident ident
+    :filename filename
     :start start
     :end end
     :raw-data value
     :data transformed}))
+
+(defn filename
+  "Get the tokens defining file"
+  [tok]
+  (:filename tok))
 
 (defn range
   "Get the start-end range in the form [start, end) for a token"
@@ -24,6 +30,13 @@
   "Get the start-end range in the form [start, end) for a token"
   [tok]
   (:end tok))
+
+(defn location
+  "Get the full location from the token"
+  [tok]
+  {:start (start tok)
+   :end (end tok)
+   :filename (filename tok)})
 
 (defn ident
   "Get the token identifier as specified by the rule"

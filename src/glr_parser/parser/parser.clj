@@ -1,9 +1,7 @@
 (ns glr-parser.parser.parser
   (:require
-   [clojure.pprint :as pprint]
    [clojure.set :as set]
    [clojure.string :as s]
-   [com.phronemophobic.clj-graphviz :as viz]
    [glr-parser.common.token :as tok]
    [glr-parser.lexer :as lex]
    [glr-parser.parser.dotted :as dot]
@@ -329,14 +327,16 @@
 (defn to-graphviz
   [states]
   (let [start-state (identify-accepting-state states)
+        viz (do (require 'com.phronemophobic.clj-graphviz)
+                (resolve 'com.phronemophobic.clj-graphviz/render-graph))
         nodes {:nodes (map #(map-state-to-node % start-state) (vals states))}
         edges {:edges (mapcat #(state-to-edges states (val %)) states)}]
-    (viz/render-graph (merge nodes edges {:default-attributes {:edge {:label ""}
-                                                               :node {:label ""
-                                                                      :penwidth "1"}}
-                                          :flags #{:directed}})
-                      {:filename "img/lr_0.png"
-                       :layout-algorithm :dot})))
+    (@viz (merge nodes edges {:default-attributes {:edge {:label ""}
+                                                   :node {:label ""
+                                                          :penwidth "1"}}
+                              :flags #{:directed}})
+          {:filename "img/lr_0.png"
+           :layout-algorithm :dot})))
 
 (def StateId
   :int)
@@ -523,21 +523,22 @@
       :else (throw (ex-info "CRITICAL: cannot parse next token: no rule found" {:token token})))))
 
 (defn- call-callback
-  [table rule-ident variant data]
+  [table rule-ident variant location data]
   (-> table
       :rules
       (get rule-ident)
-      (rl/call-callback variant data)))
+      (rl/call-callback variant location data)))
 
 (defn- new-value
-  [table rule-ident variant start end data]
-  (tok/new-token rule-ident data (call-callback table rule-ident variant data) start end))
+  [table rule-ident variant filename start end data]
+  (tok/new-token rule-ident data (call-callback table rule-ident variant {:start start :end end :filename filename} data) filename start end))
 
 (defn- value-from-values
   [table rule-ident variant values]
-  (let [min-start (tok/start (min-key tok/start values))
+  (let [min-token (min-key tok/start values)
+        min-start (tok/start min-token)
         max-end (tok/end (max-key tok/end values))]
-    (new-value table rule-ident variant min-start max-end values)))
+    (new-value table rule-ident variant (tok/filename min-token) min-start max-end values)))
 
 (defn- handle-shift
   [_table lexer stack token shift-action]

@@ -6,7 +6,7 @@
    [glr-parser.graph.dfa :as dfa]
    [glr-parser.graph.nfa :as nfa]
    [glr-parser.regex :as rgx]
-   [glr-parser.util :refer [Ident throw-on-schema-invalid]]))
+   [glr-parser.util :refer [Ident throw-on-schema-invalid fn-arities]]))
 
 (def reserved-keywords #{:eof})
 
@@ -89,10 +89,13 @@
       (#(throw-on-schema-invalid LexerType %))))
 
 (defn- call-callback
-  [lexer ident raw-content]
-  (if (get-in lexer [:callbacks ident])
-    ((get-in lexer [:callbacks ident] identity) raw-content)
-    raw-content))
+  [lexer ident location raw-content]
+  (let [callback (get-in lexer [:callbacks ident])]
+    (if callback
+      (if (some #{2} (fn-arities callback))
+        (callback location raw-content)
+        (callback raw-content))
+      raw-content)))
 
 (defn- duplicate-consts
   [lexer]
@@ -135,7 +138,7 @@
   [input const-longest-match dfa-longest-match]
   (cond
     (and (not const-longest-match) (not dfa-longest-match))
-    (throw (ex-info "cannot match next token"
+    (throw (ex-info (str "cannot match next token. Next: " (clojure.string/join "" input))
                     {:type :no-applicable-rule
                      :next-word (clojure.string/join "" input)}))
 
@@ -197,13 +200,14 @@
           start current-idx
           end (+ start match-length)
           token-as-str (apply str (subvec input-string start end))
-          transformed-token (call-callback this token token-as-str)]
+          transformed-token (call-callback this token {:start start :end end :filename filename} token-as-str)]
       (if (get skips token)
         (advance (advance-lexer-to-idx this end))
         (list (advance-lexer-to-idx this end)
               (new-token token
                          (apply str (subvec input-string start end))
                          transformed-token
+                         filename
                          start end)))))
 
   (peek [this]
