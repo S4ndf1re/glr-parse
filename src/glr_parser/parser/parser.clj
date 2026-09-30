@@ -149,7 +149,12 @@
      (cond
        ;; Both is rule and nto already visited
        (and (get-rule parser-builder first-elem) (not (contains? already-visited first-elem)))
-       (first-set parser-builder already-visited first-elem)
+       (let [first-set-for-first (first-set parser-builder already-visited first-elem)]
+         (if (contains? first-set-for-first nil)
+           (-> first-set-for-first
+               (disj nil)
+               (set/union (first-set-alternative parser-builder already-visited (rest alternative-list))))
+           first-set-for-first))
        ;; Else
        (contains? already-visited first-elem) #{}
        :else #{first-elem}))))
@@ -178,11 +183,13 @@
      (if-not (dot/is-at-end? dotted-rule)
        (let [first-set (first-set-alternative parser-builder #{}
                                               (dot/get-rest dotted-rule))]
-         (if-not (contains? first-set nil)
-           first-set
+         ;; The item's own lookahead is only spliced in when the entire rest
+         ;; of the rule is nullable; otherwise FIRST(rest) is already complete.
+         (if (contains? first-set nil)
            (-> first-set
                (disj nil)
-               (clojure.set/union (dot/get-lookahead dotted-rule)))))
+               (set/union (dot/get-lookahead dotted-rule)))
+           first-set))
        (dot/get-lookahead dotted-rule)))))
 
 (defn follow-set
