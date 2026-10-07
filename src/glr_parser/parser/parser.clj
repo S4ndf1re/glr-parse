@@ -540,12 +540,16 @@
   [table rule-ident variant filename start end data]
   (tok/new-token rule-ident data (call-callback table rule-ident variant {:start start :end end :filename filename} data) filename start end))
 
+(defn- min-max-tokens [tokens current-position]
+  (if (empty? tokens)
+    [current-position current-position]
+    (vector (tok/start (apply min-key tok/start tokens))
+            (tok/end (apply max-key tok/end tokens)))))
+
 (defn- value-from-values
-  [table rule-ident variant values]
-  (let [min-token (min-key tok/start values)
-        min-start (tok/start min-token)
-        max-end (tok/end (max-key tok/end values))]
-    (new-value table rule-ident variant (tok/filename min-token) min-start max-end values)))
+  [table rule-ident variant values filename current-position]
+  (let [[min-pos max-pos] (min-max-tokens values current-position)]
+    (new-value table rule-ident variant filename min-pos max-pos values)))
 
 (defn- handle-shift
   [_table lexer stack token shift-action]
@@ -557,7 +561,7 @@
                 :value token})))
 
 (defn- handle-reduce
-  [table lexer stack _token reduce-action]
+  [table lexer stack token reduce-action filename]
   (when-not (= (:type reduce-action) :reduce) (throw (ex-info "CRITICAL: cannot handle non reduce action in reduce action handler" {:action reduce-action})))
   (let [rule-ident (:rule reduce-action)
         variant (:variant reduce-action)
@@ -580,7 +584,9 @@
           value (value-from-values table
                                    rule-ident
                                    variant
-                                   collected-values)
+                                   collected-values
+                                   filename
+                                   (tok/start token))
           reduced-state-id (:state (peek stack))
           shift-for-ident (action-set-get-correct-action (get-in table [:actions reduced-state-id]) rule-ident)]
       (if-not (= (:type shift-for-ident) :shift)
@@ -590,9 +596,9 @@
 
 (defn- handle-action
   "Handle a single action, returning the processed lexer, and stack"
-  [table lexer stack token action]
+  [table lexer stack token action filename]
   (cond
-    (= (:type action) :reduce) (handle-reduce table lexer stack token action)
+    (= (:type action) :reduce) (handle-reduce table lexer stack token action filename)
     (= (:type action) :shift) (handle-shift table lexer stack token action)
     :else (throw (ex-info "cannot handle non shift or reduce action" {:action action}))))
 
@@ -621,7 +627,7 @@
         value
         ;; Else case
         (if action
-          (let [[new-lexer new-stack] (handle-action table lexer stack peeked-token action)]
+          (let [[new-lexer new-stack] (handle-action table lexer stack peeked-token action filename)]
             (recur new-stack new-lexer))
           (throw (ex-info "Could not apply next token in action table" {:state state
                                                                         :value value
